@@ -1,0 +1,69 @@
+{
+  "valid_solid": true,
+  "solid_count": 1,
+  "watertight": true,
+  "mesh_components": 1,
+  "self_intersections": false,
+  "bbox_mm": [
+    239.9997787475586,
+    223.99989318847656,
+    48.0
+  ],
+  "min_z": 0.0,
+  "component_intersections": {
+    "OrinNano": 0.0,
+    "ESC": 0.0,
+    "Feather": 0.0,
+    "IMU": 0.0,
+    "Camera": 0.0,
+    "MotorN1N1": 0.0,
+    "MotorN11": 0.0,
+    "Motor1N1": 0.0,
+    "Motor11": 0.0
+  },
+  "prop_intersections": [
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "component_prop_intersections": {
+    "OrinNano": 0,
+    "ESC": 0,
+    "Feather": 0,
+    "IMU": 0,
+    "Camera": 0,
+    "MotorN1N1": 0.0,
+    "MotorN11": 0.0,
+    "Motor1N1": 0.0,
+    "Motor11": 0.0
+  },
+  "rear_connector_intersections": {
+    "ESC": 0,
+    "Feather": 0,
+    "IMU": 0,
+    "Camera": 0,
+    "MotorN1N1": 0,
+    "MotorN11": 0,
+    "Motor1N1": 0,
+    "Motor11": 0
+  },
+  "frame_rear_connector_intersection": 0.0,
+  "fan_clearance_intersection": 0.0,
+  "camera_cone_intersection": 0.0,
+  "bench_hole_centres": [],
+  "flat_bonding_area_mm": [
+    110,
+    116
+  ],
+  "user_tray_footprint_mm": [
+    95,
+    111
+  ],
+  "flat_top_z_mm": 6,
+  "flat_surface_obstruction_mm3": 0.0,
+  "flat_area_missing_material_mm3": 0.0,
+  "user_tray_verified": false,
+  "jetson_reference_note": "Nominal placement only; user tray footprint 95 x 111 mm; support height and complete envelope unmeasured",
+  "passes": true
+}

@@ -1,0 +1,149 @@
+{
+  "passes": true,
+  "objects": 1,
+  "plates": 1,
+  "model_mm": [
+    239.9997787475586,
+    223.99989318847656,
+    48.0
+  ],
+  "extrusion_bounds_xy_mm": [
+    5.388,
+    13.389,
+    250.612,
+    242.612
+  ],
+  "extrusion_footprint_mm": [
+    245.224,
+    229.22299999999998
+  ],
+  "bed_mm": [
+    256,
+    256
+  ],
+  "estimated_minutes": 363.49189453125,
+  "estimated_grams": 184.95533752441406,
+  "remaining_checks": "Physical fit, motor screw length, wiring, strength, heat and fixture restraint remain unverified.",
+  "motor_hole_toolpath_checks": [
+    {
+      "hole": "-1,-1 relief",
+      "diameter_mm": 9.0,
+      "min_extrusion_centreline_radius_mm": 4.682,
+      "open_layers": 25
+    },
+    {
+      "hole": "-1,-1 screw -5.75,-5.75",
+      "diameter_mm": 3.4,
+      "min_extrusion_centreline_radius_mm": 1.875,
+      "open_layers": 25
+    },
+    {
+      "hole": "-1,-1 screw -5.75,5.75",
+      "diameter_mm": 3.4,
+      "min_extrusion_centreline_radius_mm": 1.869,
+      "open_layers": 25
+    },
+    {
+      "hole": "-1,-1 screw 5.75,-5.75",
+      "diameter_mm": 3.4,
+      "min_extrusion_centreline_radius_mm": 1.877,
+      "open_layers": 25
+    },
+    {
+      "hole": "-1,-1 screw 5.75,5.75",
+      "diameter_mm": 3.4,
+      "min_extrusion_centreline_radius_mm": 1.875,
+      "open_layers": 25
+    },
+    {
+      "hole": "-1,1 relief",
+      "diameter_mm": 9.0,
+      "min_extrusion_centreline_radius_mm": 4.681,
+      "open_layers": 25
+    },
+    {
+      "hole": "-1,1 screw -5.75,-5.75",
+      "diameter_mm": 3.4,
+      "min_extrusion_centreline_radius_mm": 1.875,
+      "open_layers": 25
+    },
+    {
+      "hole": "-1,1 screw -5.75,5.75",
+      "diameter_mm": 3.4,
+      "min_extrusion_centreline_radius_mm": 1.878,
+      "open_layers": 25
+    },
+    {
+      "hole": "-1,1 screw 5.75,-5.75",
+      "diameter_mm": 3.4,
+      "min_extrusion_centreline_radius_mm": 1.868,
+      "open_layers": 25
+    },
+    {
+      "hole": "-1,1 screw 5.75,5.75",
+      "diameter_mm": 3.4,
+      "min_extrusion_centreline_radius_mm": 1.875,
+      "open_layers": 25
+    },
+    {
+      "hole": "1,-1 relief",
+      "diameter_mm": 9.0,
+      "min_extrusion_centreline_radius_mm": 4.681,
+      "open_layers": 25
+    },
+    {
+      "hole": "1,-1 screw -5.75,-5.75",
+      "diameter_mm": 3.4,
+      "min_extrusion_centreline_radius_mm": 1.875,
+      "open_layers": 25
+    },
+    {
+      "hole": "1,-1 screw -5.75,5.75",
+      "diameter_mm": 3.4,
+      "min_extrusion_centreline_radius_mm": 1.87,
+      "open_layers": 25
+    },
+    {
+      "hole": "1,-1 screw 5.75,-5.75",
+      "diameter_mm": 3.4,
+      "min_extrusion_centreline_radius_mm": 1.875,
+      "open_layers": 25
+    },
+    {
+      "hole": "1,-1 screw 5.75,5.75",
+      "diameter_mm": 3.4,
+      "min_extrusion_centreline_radius_mm": 1.87,
+      "open_layers": 25
+    },
+    {
+      "hole": "1,1 relief",
+      "diameter_mm": 9.0,
+      "min_extrusion_centreline_radius_mm": 4.682,
+      "open_layers": 25
+    },
+    {
+      "hole": "1,1 screw -5.75,-5.75",
+      "diameter_mm": 3.4,
+      "min_extrusion_centreline_radius_mm": 1.875,
+      "open_layers": 25
+    },
+    {
+      "hole": "1,1 screw -5.75,5.75",
+      "diameter_mm": 3.4,
+      "min_extrusion_centreline_radius_mm": 1.878,
+      "open_layers": 25
+    },
+    {
+      "hole": "1,1 screw 5.75,-5.75",
+      "diameter_mm": 3.4,
+      "min_extrusion_centreline_radius_mm": 1.87,
+      "open_layers": 25
+    },
+    {
+      "hole": "1,1 screw 5.75,5.75",
+      "diameter_mm": 3.4,
+      "min_extrusion_centreline_radius_mm": 1.87,
+      "open_layers": 25
+    }
+  ]
+}

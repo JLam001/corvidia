@@ -1,0 +1,392 @@
+{
+  "MotorX": [
+    104,
+    "design allowance",
+    "Motor centre X magnitude"
+  ],
+  "MotorY": [
+    96,
+    "design allowance",
+    "Motor centre Y magnitude"
+  ],
+  "PropDiameter": [
+    101.6,
+    "manufacturer drawing/specification",
+    "HQProp 4 inch swept diameter"
+  ],
+  "PropHubDiameter": [
+    13,
+    "manufacturer drawing/specification",
+    "Hub exclusion diameter"
+  ],
+  "PropHubHeight": [
+    5.7,
+    "manufacturer drawing/specification",
+    "HQProp hub height"
+  ],
+  "PropBore": [
+    5,
+    "manufacturer drawing/specification",
+    "M5 shaft bore"
+  ],
+  "PropBottom": [
+    35,
+    "design allowance - MEASURE",
+    "Absolute Z of lowest installed blade surface, provisional"
+  ],
+  "PropTop": [
+    43,
+    "design allowance - MEASURE",
+    "Absolute Z of highest installed blade surface, provisional"
+  ],
+  "GuardID": [
+    109.6,
+    "design allowance",
+    "4 mm nominal radial tip clearance"
+  ],
+  "GuardWall": [
+    1.6,
+    "design allowance",
+    "Revision B curved guard wall; four nominal nozzle widths"
+  ],
+  "GuardLipRadius": [
+    0.8,
+    "design allowance",
+    "Fully rounded band lips, half wall thickness"
+  ],
+  "GuardMargin": [
+    4,
+    "design allowance",
+    "Minimum vertical margin above and below prop envelope"
+  ],
+  "DeckX": [
+    120,
+    "design allowance",
+    "Central deck length"
+  ],
+  "DeckY": [
+    108,
+    "design allowance",
+    "Central deck width"
+  ],
+  "DeckThickness": [
+    4,
+    "design allowance",
+    "Central deck and shelf thickness"
+  ],
+  "ArmThickness": [
+    6,
+    "design allowance",
+    "Arm root and motor pad thickness below deck"
+  ],
+  "AdapterThickness": [
+    6,
+    "design allowance",
+    "Replaceable motor adapter"
+  ],
+  "MotorDiameter": [
+    27.9,
+    "manufacturer drawing/specification",
+    "Readytosky body diameter"
+  ],
+  "MotorLength": [
+    31.7,
+    "manufacturer drawing/specification",
+    "Published overall length; not installed prop datum"
+  ],
+  "MotorBodyHeight": [
+    24,
+    "design allowance - MEASURE",
+    "Body-only envelope above adapter"
+  ],
+  "MotorPitch": [
+    11.5,
+    "user measurement",
+    "Square mounting pitch, not diagonal"
+  ],
+  "MotorRelief": [
+    9,
+    "design allowance - MEASURE",
+    "Shaft and boss relief diameter"
+  ],
+  "M3Clearance": [
+    3.4,
+    "design allowance",
+    "Printed M3 through bore"
+  ],
+  "M3NutAF": [
+    5.8,
+    "design allowance",
+    "Captured M3 hex across flats"
+  ],
+  "M3NutDepth": [
+    2.6,
+    "design allowance",
+    "Captured M3 hex depth"
+  ],
+  "M2Clearance": [
+    2.4,
+    "design allowance",
+    "Printed clearance for M2"
+  ],
+  "M25Clearance": [
+    2.9,
+    "design allowance",
+    "Printed clearance for M2.5"
+  ],
+  "M4Clearance": [
+    4.5,
+    "design allowance",
+    "Bench attachment clearance"
+  ],
+  "MateClearance": [
+    0.3,
+    "design allowance",
+    "Per-side moving bracket clearance"
+  ],
+  "BenchX": [
+    40,
+    "design allowance",
+    "Bench hole X magnitude"
+  ],
+  "BenchY": [
+    20,
+    "design allowance",
+    "Bench hole Y magnitude"
+  ],
+  "ShelfZ": [
+    24,
+    "design allowance",
+    "Shelf lower face"
+  ],
+  "JetsonGap": [
+    8,
+    "design allowance",
+    "Plate upper face to PCB underside; unthreaded landing pads support bare mounting lands"
+  ],
+  "JetsonX": [
+    79,
+    "manufacturer CAD",
+    "Rotated carrier extent along frame X"
+  ],
+  "JetsonY": [
+    100,
+    "manufacturer CAD",
+    "Rotated carrier extent along frame Y"
+  ],
+  "JetsonPitchX": [
+    58,
+    "manufacturer CAD",
+    "Native Y mounting pitch"
+  ],
+  "JetsonPitchY": [
+    86,
+    "manufacturer CAD",
+    "Selected native X mounting pitch"
+  ],
+  "JetsonHoleOffsetX": [
+    6.5,
+    "manufacturer CAD",
+    "Mount pattern centre relative carrier centre X"
+  ],
+  "JetsonHoleOffsetY": [
+    3,
+    "manufacturer CAD",
+    "Mount pattern centre relative carrier centre Y"
+  ],
+  "JetsonCoolerTop": [
+    29.866,
+    "manufacturer CAD",
+    "Maximum cooler Z above carrier bottom"
+  ],
+  "FanHeadroom": [
+    10,
+    "design allowance",
+    "Unobstructed volume above cooler"
+  ],
+  "FeatherX": [
+    50.8,
+    "manufacturer drawing",
+    "Eagle PCB outline"
+  ],
+  "FeatherY": [
+    22.86,
+    "manufacturer drawing",
+    "Eagle PCB outline"
+  ],
+  "FeatherEnvelopeX": [
+    52,
+    "manufacturer drawing/specification",
+    "Published assembly length"
+  ],
+  "FeatherEnvelopeY": [
+    23,
+    "manufacturer drawing/specification",
+    "Published assembly width"
+  ],
+  "FeatherEnvelopeZ": [
+    10,
+    "manufacturer drawing/specification",
+    "Published assembly height"
+  ],
+  "FeatherPitchX": [
+    45.72,
+    "manufacturer drawing",
+    "Eagle mounting coordinates"
+  ],
+  "FeatherPitchY": [
+    17.78,
+    "manufacturer drawing",
+    "Eagle mounting coordinates"
+  ],
+  "FeatherCentreY": [
+    32,
+    "design allowance",
+    "Feather beside ESC"
+  ],
+  "ImuX": [
+    25.4,
+    "manufacturer drawing",
+    "BNO085 board outline"
+  ],
+  "ImuY": [
+    22.86,
+    "manufacturer drawing",
+    "BNO085 board outline"
+  ],
+  "ImuPitchX": [
+    20.32,
+    "manufacturer drawing",
+    "Eagle mounting coordinates"
+  ],
+  "ImuPitchY": [
+    17.78,
+    "manufacturer drawing",
+    "Eagle mounting coordinates"
+  ],
+  "ImuCentreY": [
+    -32,
+    "design allowance",
+    "IMU beside ESC"
+  ],
+  "ImuHeight": [
+    6,
+    "design allowance - MEASURE",
+    "BNO085 assembly envelope"
+  ],
+  "EscX": [
+    33,
+    "manufacturer specification via retailer",
+    "G45M envelope"
+  ],
+  "EscY": [
+    30,
+    "manufacturer specification via retailer",
+    "G45M envelope"
+  ],
+  "EscZ": [
+    6.1,
+    "manufacturer specification via retailer",
+    "G45M envelope"
+  ],
+  "EscPitch": [
+    20,
+    "manufacturer specification via retailer",
+    "Supplied M2 grommet mounting pitch"
+  ],
+  "BoardZ": [
+    10,
+    "design allowance",
+    "Lower board undersides; use ESC grommets"
+  ],
+  "CameraSize": [
+    38,
+    "manufacturer drawing",
+    "B0249 PCB square"
+  ],
+  "CameraPitch": [
+    34,
+    "manufacturer drawing",
+    "B0249 outer hole pitch"
+  ],
+  "CameraLensDiameter": [
+    30,
+    "manufacturer drawing",
+    "Stock lens body"
+  ],
+  "CameraLensLength": [
+    31,
+    "manufacturer drawing",
+    "Lens alone, not assembly depth"
+  ],
+  "CameraDepth": [
+    45,
+    "design allowance - MEASURE",
+    "PCB front to front of complete camera, provisional"
+  ],
+  "CameraPCBThickness": [
+    1.6,
+    "design allowance - MEASURE",
+    "Camera PCB thickness"
+  ],
+  "CameraPivotX": [
+    70,
+    "design allowance",
+    "Forward camera pivot"
+  ],
+  "CameraPivotZ": [
+    54,
+    "design allowance",
+    "Camera pivot height"
+  ],
+  "CameraTilt": [
+    0,
+    "design allowance",
+    "Degrees upward, allowed 0 to 20"
+  ],
+  "CameraTiltMax": [
+    20,
+    "design allowance",
+    "Mechanical slot adjustment span, degrees"
+  ],
+  "CameraFOV": [
+    65,
+    "manufacturer drawing",
+    "Horizontal field angle, degrees"
+  ],
+  "CanopyTop": [
+    79,
+    "design allowance",
+    "Open canopy upper edge"
+  ],
+  "PrintLimit": [
+    246,
+    "design allowance",
+    "Maximum XY footprint with reserved brim space"
+  ],
+  "GuardFlare": [
+    0.6,
+    "design allowance",
+    "Radial outward flare at upper and lower lips"
+  ],
+  "GuardStayWidth": [
+    3.6,
+    "design allowance",
+    "Tangential width of the four curved support ribs"
+  ],
+  "JetsonPCBThickness": [
+    1.57,
+    "manufacturer CAD",
+    "Carrier PCB thickness; tray rim ends flush with its top"
+  ],
+  "TrayClearance": [
+    0.4,
+    "design allowance - FIT COUPON",
+    "Per-side clearance between PCB outline and tray rim"
+  ],
+  "TrayRimThickness": [
+    1.4,
+    "design allowance",
+    "Thin edge stops with port openings"
+  ]
+}
