@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.FCStd1
+*.FCBak
+tmp/
+.DS_Store
+*.tmp

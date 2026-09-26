@@ -1,0 +1,8 @@
+{
+  "success": true,
+  "objects": 1,
+  "plates": 1,
+  "embedded_profiles_resliced": true,
+  "motor_holes_open_after_reslice": 20,
+  "revision": "wider arms, indexed mesh export correction"
+}

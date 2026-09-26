@@ -1,0 +1,16 @@
+import sys
+from pathlib import Path
+import FreeCAD as App, FreeCADGui as Gui
+root=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(root/'cad'))
+import compact_frame, importlib
+importlib.reload(compact_frame)
+path=root/'Corvidia_Compact.FCStd'
+if not path.exists():path=root/'output/Compact_P2S_PLA/Corvidia_Compact.FCStd'
+doc=next((d for d in App.listDocuments().values() if d.FileName==str(path)),None)
+if doc is None:doc=App.openDocument(str(path))
+compact_frame.CompactFeature(doc.CompactFrame,doc.Parameters)
+App.setActiveDocument(doc.Name)
+doc.CompactFrame.ViewObject.ShapeColor=(.19,.22,.25)
+for o in doc.ComponentReferences.Group:o.ViewObject.Visibility=False
+Gui.activeDocument().activeView().viewAxonometric();Gui.activeDocument().activeView().fitAll()
