@@ -41,10 +41,8 @@ summary{cursor:pointer;color:#b3c8dd}.capture[hidden]{display:none}.capture img{
 <label for="appearance">Who should the camera find?</label>
 <textarea id="appearance" maxlength="240" required placeholder="A person wearing a red shirt"></textarea>
 <p class="small">Describe the person to match. This demo supports people.</p>
-<div class="fields"><div><label for="percent">Motor input (%)</label><input id="percent" type="number" min="0.1" max="20" step="0.1" value="5"></div><div><label for="duration">Maximum time (s)</label><input id="duration" type="number" min="1" max="60" step="1" value="10"></div></div>
-<p class="small">Equal input to all four motors. Input is not measured RPM or electrical power. The mission stops early after a confirmed image is saved.</p>
-<div class="buttons"><button id="prepare" class="secondary">Prepare mission</button></div>
-<p id="interpreted" class="notice">Prepare a mission to review the target and checks.</p>
+<p class="small">Submitting the mission starts the configured stand run. A confirmed, saved capture stops it; an internal deadline and fault checks also end the mission.</p>
+<p id="interpreted" class="notice">Enter a person description to begin.</p>
 <fieldset id="readiness" class="checks"><legend>Before each hardware start</legend>
 <label><input id="guarded_stand" type="checkbox">The drone is secured in the guarded stand; turning uses the external handle.</label>
 <label><input id="hands_clear" type="checkbox">Hands, people, and loose cables are clear of the motors and propellers.</label>
@@ -52,8 +50,8 @@ summary{cursor:pointer;color:#b3c8dd}.capture[hidden]{display:none}.capture img{
 <label><input id="esc_startup_finished" type="checkbox">The ESC startup tones have finished.</label>
 <label><input id="motors_still" type="checkbox">All four motors are still before starting.</label>
 </fieldset>
-<div class="buttons"><button id="start" disabled>Start mission</button><button id="stop" class="stop" disabled>Stop · Esc</button></div>
-<p class="small">Keep this page visible. Losing its operator connection ends an active run. After Stop, observe the motors before approaching.</p>
+<div class="buttons"><button id="start" disabled>Find person</button><button id="stop" class="stop" disabled>Abort mission · Esc</button></div>
+<p class="small">The Jetson owns the mission after submission. Closing this page or disconnecting the Mac does not stop it. Use Abort mission to end it early, and observe the motors before approaching.</p>
 <p id="error" class="error" role="alert"></p>
 </section>
 <div class="stack">
@@ -75,9 +73,9 @@ const storageKey = 'corvidia-stand-token:' + location.host;
 let token = params.get('token') || '';
 try {if(token) sessionStorage.setItem(storageKey,token); else token=sessionStorage.getItem(storageKey)||'';} catch (_) {}
 if(params.has('token')) history.replaceState(null,'',location.pathname);
-let status = {}, pending = false, leaseBusy = false, previewUrl = null, evidenceUrl = null, capturedMission = null;
+let status = {}, pending = false, previewUrl = null, evidenceUrl = null, capturedMission = null;
 const readinessNames = ['guarded_stand','hands_clear','power_disconnect_accessible','motors_still','esc_startup_finished'];
-const activeStates = new Set(['starting','running','searching','confirming','saving','stopping']);
+const activeStates = new Set(['preparing','starting','running','searching','confirming','saving','stopping']);
 const terminalStates = new Set(['idle','complete','completed','stopped','failed','fault','aborted','expired','cancelled','timeout','timed_out']);
 const guidanceLabels = {hold:'Hold the stand still',search_right:'Turn the stand slowly right',search_left:'Turn the stand slowly left',turn_right:'Turn the stand right',turn_left:'Turn the stand left',left:'Turn the stand left',right:'Turn the stand right',stop:'Stop turning the stand'};
 function error(message) {$('error').textContent=message;}
@@ -101,12 +99,11 @@ function render() {
   const guidance=status.guidance;
   const guide=typeof guidance==='string'?guidance:(guidance?.text||guidance?.action||'Waiting for a mission');
   $('guidance').textContent=guidanceLabels[guide]||guide;
-  $('interpreted').textContent=status.mission_id?'Target: '+(status.appearance||'Awaiting description')+' · '+status.percent+'% motor input · maximum '+((status.duration_ms||0)/1000)+' seconds':'Prepare a mission to review the target and checks.';
+  $('interpreted').textContent=status.mission_id?'Target: '+(status.appearance||'Awaiting description')+' · '+status.percent+'% motor input · maximum '+((status.duration_ms||0)/1000)+' seconds':'Enter a person description to begin.';
   $('readiness').hidden=status.mode!=='hardware';
   const ready=status.mode!=='hardware'||readinessNames.every(name=>$(name).checked);
-  $('start').disabled=pending||!token||status.recovery_required||status.mode==='telemetry'||!status.mission_id||!['prepared','ready'].includes(state)||!ready;
+  $('start').disabled=pending||!token||status.recovery_required||status.mode==='telemetry'||activeStates.has(state)||!ready;
   $('stop').disabled=!token||!status.mission_id||terminalStates.has(state);
-  $('prepare').disabled=pending||!token||status.recovery_required||activeStates.has(state);
   const motor=status.motor||{};
   const zero=motor.zero_confirmed||motor.zero_verified||motor.fresh_zero;
   $('zero-status').textContent=status.mode==='observe'?'Motor commands are simulated; the mission does not drive hardware.':zero?'Fresh zero-input telemetry confirmed. Observe physical motor stopping before approaching.':'Physical motor stopping is not measured. Await fresh zero-input telemetry and observe the motors.';
@@ -122,7 +119,7 @@ async function refresh() {
     if(!response.ok) throw new Error('Supervisor unavailable');
     status=await response.json(); render(); $('connection').textContent='Supervisor connected';
     if(status.evidence_available && status.mission_id!==capturedMission) await showEvidence(status.mission_id);
-  } catch(e) {$('connection').textContent='Connection lost — active mission will stop'; $('start').disabled=true; error(e.message);}
+  } catch(e) {$('connection').textContent='Debug connection lost — mission continues on the Jetson'; $('start').disabled=true; error(e.message);}
 }
 async function showEvidence(mission) {
   const response=await fetch('/api/evidence?mission_id='+encodeURIComponent(mission),{headers:{'X-Corvidia-Token':token},signal:AbortSignal.timeout(1500)});
@@ -130,45 +127,33 @@ async function showEvidence(mission) {
   const next=URL.createObjectURL(await response.blob()); if(evidenceUrl) URL.revokeObjectURL(evidenceUrl);
   evidenceUrl=next; $('evidence').src=next; $('capture').hidden=false; $('capture-label').textContent='Mission '+mission; capturedMission=mission;
 }
-async function prepare() {
-  pending=true; error(''); render();
-  try {
-    const percent=Number($('percent').value), seconds=Number($('duration').value);
-    if(!$('appearance').value.trim()) throw new Error('Describe the visible appearance of the person to match.');
-    if(!Number.isFinite(percent)||percent<=0||percent>20||!Number.isInteger(seconds)||seconds<1||seconds>60) throw new Error('Choose motor input above 0 up to 20%, and 1–60 whole seconds.');
-    await command('prepare',{appearance:$('appearance').value,percent,duration_ms:seconds*1000});
-    readinessNames.forEach(name=>$(name).checked=false); $('capture').hidden=true;
-    await refresh();
-  } catch(e) {error(e.message);} finally {pending=false; render();}
-}
 async function start() {
   if($('start').disabled) return;
   pending=true; error(''); render();
-  try {const body={mission_id:status.mission_id};if(status.mode==='hardware') body.readiness=Object.fromEntries(readinessNames.map(name=>[name,$(name).checked]));await command('start',body); readinessNames.forEach(name=>$(name).checked=false); await refresh();}
-  catch(e) {error(e.message);} finally {pending=false; render();}
+  try {
+    if(!$('appearance').value.trim()) throw new Error('Describe the person to find.');
+    const body={appearance:$('appearance').value.trim()};
+    if(status.mode==='hardware') body.readiness=Object.fromEntries(readinessNames.map(name=>[name,$(name).checked]));
+    const result=await command('mission',body);
+    if(result.mission_id) {status.mission_id=result.mission_id;status.state='preparing';}
+    readinessNames.forEach(name=>$(name).checked=false); $('capture').hidden=true;
+    await refresh();
+  } catch(e) {error('Submission outcome: '+e.message+'. Check mission status before trying again.');}
+  finally {pending=false; render();}
 }
 async function stop() {
   if(!status.mission_id) return;
   try {await command('stop',{mission_id:status.mission_id}); await refresh();} catch(e) {error('Stop could not be acknowledged: '+e.message+'. Use the external power disconnect if needed.');}
 }
-async function lease() {
-  const state=String(status.state||'').toLowerCase();
-  if(status.operator==='terminal'||document.hidden||leaseBusy||!token||!status.mission_id||!(status.lease_required===true||activeStates.has(state))) return;
-  leaseBusy=true;
-  try {await command('lease',{mission_id:status.mission_id});} catch(e) {$('connection').textContent='Operator lease lost — active mission will stop';} finally {leaseBusy=false;}
-}
 async function preview() {
   try {const response=await fetch('/frame.jpg',{cache:'no-store',signal:AbortSignal.timeout(1200)}); if(response.ok) {const next=URL.createObjectURL(await response.blob()); if(previewUrl) URL.revokeObjectURL(previewUrl); previewUrl=next; $('preview').src=next;}} catch (_) {}
   setTimeout(preview,200);
 }
-$('prepare').addEventListener('click',prepare); $('start').addEventListener('click',start); $('stop').addEventListener('click',stop);
+$('start').addEventListener('click',start); $('stop').addEventListener('click',stop);
 readinessNames.forEach(name=>$(name).addEventListener('change',render));
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();stop();}});
-function backgroundStop(){if(status.operator!=='terminal'&&token&&status.mission_id&&(status.lease_required===true||activeStates.has(String(status.state).toLowerCase()))) command('stop',{mission_id:status.mission_id},true).catch(()=>{});}
-document.addEventListener('visibilitychange',()=>{if(document.hidden) backgroundStop();});
-window.addEventListener('pagehide',backgroundStop);
 if(!token) error('Open the operator link printed by the stand service to enable controls.');
-refresh(); preview(); setInterval(refresh,500); setInterval(lease,250);
+refresh(); preview(); setInterval(refresh,500);
 </script>
 </body>
 </html>

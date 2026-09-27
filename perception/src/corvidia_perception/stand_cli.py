@@ -18,12 +18,11 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-import uuid
 
 
 DEFAULT_SESSION = Path("~/.local/state/corvidia/stand-8080.json").expanduser()
 DEFAULT_URL = "http://127.0.0.1:8080"
-ACTIVE = {"starting", "searching", "confirming", "saving"}
+ACTIVE = {"preparing", "starting", "searching", "confirming", "saving"}
 TERMINAL = {"complete", "failed", "timed_out", "cancelled"}
 READINESS = (
     ("guarded_stand", "Drone secured in the guarded stand; turning uses the external handle"),
@@ -138,29 +137,47 @@ class ApiClient:
     def post(self, action, body):
         return self._request("/api/" + action, body)
 
+    def get_image(self, path, *, authenticated=False):
+        """Read a bounded image from this same loopback supervisor."""
+        if not isinstance(path, str) or not path.startswith("/") or path.startswith("//"):
+            raise ClientError("Image path must be relative to the supervisor")
+        headers = {"Accept": "image/jpeg, image/png"}
+        if authenticated:
+            if not self.token:
+                raise ClientError("An operator session is required for saved evidence")
+            headers["X-Corvidia-Token"] = self.token
+        request = urllib.request.Request(self.url + path, headers=headers)
+        try:
+            with self.opener.open(request, timeout=self.timeout) as response:
+                if response.headers.get_content_type() not in ("image/jpeg", "image/png"):
+                    raise ClientError("Supervisor did not return a JPEG or PNG image")
+                data = response.read(10 * 1024 * 1024 + 1)
+                if not data or len(data) > 10 * 1024 * 1024:
+                    raise ClientError("Supervisor image is empty or too large")
+                return data
+        except urllib.error.HTTPError as exc:
+            raise ClientError(f"Image request rejected (HTTP {exc.code})") from None
+        except (urllib.error.URLError, TimeoutError, OSError):
+            raise ClientError("Image request timed out or connection failed") from None
 
-def settings(appearance, percent, seconds):
+
+def settings(appearance):
     if not isinstance(appearance, str) or not 1 <= len(appearance.strip()) <= 240:
         raise ClientError("Describe the person's visible appearance in 1–240 characters")
     appearance = appearance.strip()
     if any(ord(c) < 32 or ord(c) == 127 for c in appearance):
         raise ClientError("Use a single-line description without control characters")
-    if type(percent) not in (int, float) or not math.isfinite(percent) or not 0 < percent <= 20:
-        raise ClientError("Motor input must be greater than zero and at most 20%")
-    if type(seconds) is not int or not 1 <= seconds <= 60:
-        raise ClientError("Maximum duration must be 1–60 whole seconds")
-    return dict(appearance=appearance, percent=float(percent), duration_ms=seconds * 1000)
+    return dict(appearance=appearance)
 
 
 class TerminalMission:
     def __init__(self, api, *, clock=time.monotonic, sleep=time.sleep, out=print,
-                 stdin=None, readiness_reader=None, prepare_timeout=15., stop_timeout=4.):
+                 stdin=None, readiness_reader=None, stop_timeout=4.):
         self.api, self.clock, self.sleep, self.out = api, clock, sleep, out
         self.stdin = sys.stdin if stdin is None else stdin
         self.readiness_reader = readiness_reader or self._read_readiness
-        self.prepare_timeout, self.stop_timeout = prepare_timeout, stop_timeout
+        self.stop_timeout = stop_timeout
         self.mission_id = None
-        self.lease_id = uuid.uuid4().hex
         self.cleaning = False
         self.last_display = None
 
@@ -180,17 +197,12 @@ class TerminalMission:
     def _mode(self, status, hardware):
         expected = "hardware" if hardware else "observe"
         if status.get("mode") != expected:
-            raise ClientError(f"Expected {expected} service; actual mode is {status.get('mode', 'unknown')}. No start sent")
+            raise ClientError(f"Expected {expected} service; actual mode is {status.get('mode', 'unknown')}")
 
-    def _matches(self, status, wanted):
-        return all(status.get(key) == value for key, value in wanted.items())
-
-    def _ready(self, status):
-        preflight = status.get("preflight", {})
-        return (preflight.get("camera_ready") is True and preflight.get("motor_ready") is True
-                and preflight.get("resource_ready", True) is True
-                and preflight.get("telemetry_ready", True) is True
-                and not status.get("recovery_required"))
+    def _onboard(self, status):
+        if (status.get("control_authority") != "onboard" or status.get("lease_required") is not False
+                or status.get("mission_api") != 2):
+            raise ClientError("The service must advertise onboard mission API 2 before submitting a mission")
 
     def _display(self, status):
         remaining = status.get("remaining_ms")
@@ -213,13 +225,13 @@ class TerminalMission:
                 and motor.get("stop_status") == "not_requested")
 
     def _stop_and_verify(self):
-        """Revoke authority first. No lease renewal or new start is possible here."""
+        """Explicitly request stop, then verify its result without starting anything."""
         self.cleaning = True
         deadline = self.clock() + self.stop_timeout
         try:
             self.api.post("stop", {"mission_id": self.mission_id})
         except Exception:
-            self.say("Stop request was not acknowledged; checking final status without renewing the lease.")
+            self.say("Stop request was not acknowledged; checking final status.")
         while self.clock() < deadline:
             try:
                 status = self.api.status()
@@ -255,115 +267,94 @@ class TerminalMission:
         self.say(f"Mission {status.get('state')}: {status.get('error') or 'no successful capture'}")
         return 1
 
-    def run(self, appearance, percent=5, seconds=10, *, hardware=False):
-        final = None
-        wanted = None
-        prior_id = None
-        prepare_attempted = False
-        primary_error = None
-        interrupted = False
+    def run(self, appearance, *, hardware=False):
+        """Submit once; all execution and deadlines belong to the Jetson."""
+        self.cleaning = False
+        self.mission_id = None
+        submitted = receipt = interrupted = False
+        error = None
         try:
-            wanted = settings(appearance, percent, seconds)
+            wanted = settings(appearance)
             initial = self.api.status()
             self._mode(initial, hardware)
+            self._onboard(initial)
             if initial.get("state") in ACTIVE | {"stopping"}:
                 raise ClientError("A mission is already active; this run will not adopt or replace it")
             if not getattr(self.api, "token", None):
                 raise ClientError("An operator session is required for commands")
+            if initial.get("recovery_required"):
+                raise ClientError("The Jetson requires physical recovery before another mission")
             if hardware and not self.stdin.isatty():
                 raise ClientError("Hardware readiness requires an interactive terminal; piped answers are refused")
             prior_id = initial.get("mission_id")
-            prepare_attempted = True
-            self.api.post("prepare", wanted)  # Exactly once, including ambiguous failures.
-            deadline = self.clock() + self.prepare_timeout
-            while self.clock() < deadline:
-                current = self.api.status()
-                self._mode(current, hardware)
-                if current.get("mission_id") and current["mission_id"] != prior_id:
-                    if not self._matches(current, wanted) or current.get("state") != "prepared":
-                        raise ClientError("Prepared mission does not match this request; no start sent")
-                    self.mission_id = current["mission_id"]
-                    if self._ready(current):
-                        break
-                self.sleep(min(.25, max(0., deadline - self.clock())))
-            else:
-                raise ClientError("Preparation/preflight timed out; no start sent")
-            self.say(f"Review: {wanted['appearance']} | {initial['mode']} | {percent:g}% motor input | maximum {seconds}s")
+            self.say(f"Mission: {wanted['appearance']} | {initial['mode']} | onboard demo profile")
             readiness = {}
             if hardware:
                 readiness_deadline = self.clock() + 120.
                 for key, prompt in READINESS:
                     if self.readiness_reader(prompt, readiness_deadline) != "yes":
-                        raise ClientError("Readiness was not confirmed; mission was not started")
+                        raise ClientError("Readiness was not confirmed; no mission was submitted")
                     if self.clock() >= readiness_deadline:
-                        raise ClientError("Readiness confirmation timed out; mission was not started")
+                        raise ClientError("Readiness confirmation timed out; no mission was submitted")
                     readiness[key] = True
             current = self.api.status()
             self._mode(current, hardware)
-            if (current.get("mission_id") != self.mission_id or current.get("state") != "prepared"
-                    or not self._matches(current, wanted) or not self._ready(current)):
-                raise ClientError("Prepared mission or preflight changed; no start sent")
-            run_deadline = self.clock() + seconds  # Never renewed by responses or leases.
-            acceptance_deadline = self.clock() + 3.
-            body = {"mission_id": self.mission_id, "lease_id": self.lease_id}
+            self._onboard(current)
+            if (current.get("mission_id") != prior_id or current.get("state") in ACTIVE | {"stopping"}
+                    or current.get("recovery_required")):
+                raise ClientError("Mission state or recovery requirement changed; no mission was submitted")
+            body = dict(wanted)
             if hardware:
                 body["readiness"] = readiness
-            self.api.post("start", body)  # Exactly once. HTTP 202 is only queue admission.
-            while self.clock() < run_deadline:
-                cycle = self.clock()
-                current = self.api.status()
-                if current.get("mission_id") != self.mission_id:
-                    raise ClientError("Current mission changed; this terminal will not control another mission")
-                self._mode(current, hardware)
-                self._display(current)
-                if current.get("state") in TERMINAL:
-                    final = current
-                    break
-                motor = current.get("motor", {})
-                if current.get("recovery_required") or motor.get("fault") or motor.get("error") or motor.get("start_status") == "failed":
-                    raise ClientError("Motor interface reported a fault or failed start")
-                if self.clock() >= acceptance_deadline and motor.get("start_status") != "accepted":
-                    raise ClientError("Motor start was not accepted within three seconds; command will not be retried")
-                if current.get("state") in ACTIVE:
-                    self.api.post("lease", {"mission_id": self.mission_id, "lease_id": self.lease_id})
-                elif current.get("state") == "prepared" and current.get("error"):
-                    raise ClientError("Supervisor did not accept the start")
-                self.sleep(max(0., min(.25 - (self.clock() - cycle), run_deadline - self.clock())))
-            if final is None:
-                self.say("Client time limit reached; requesting stop and final verification.")
+            # A response can be lost after acceptance. Never retry, infer an ID
+            # from matching text, or automatically Stop on an ambiguous result.
+            submitted = True
+            reply = self.api.post("mission", body)
+            mid = reply.get("mission_id")
+            if (reply.get("accepted") is not True or not isinstance(mid, str)
+                    or not 1 <= len(mid) <= 128 or mid == prior_id):
+                raise ClientError("Mission response did not identify a newly accepted request")
+            self.mission_id = mid
+            receipt = True
+            self.say(f"Mission {self.mission_id} submitted to the Jetson.")
+            self.say("The Jetson performs preflight and runs the fixed demo profile independently.")
+            self.say("Submission does not confirm motor motion. Use 'watch' or 'status' for the outcome; 'stop' ends the mission.")
+            return 0
         except (KeyboardInterrupt, Cancelled):
             interrupted = True
-            primary_error = "Interrupted; ending this mission"
+            error = "Terminal operation interrupted"
         except Exception as exc:
-            primary_error = str(exc)
+            error = str(exc)
         finally:
-            self.cleaning = True  # Repeated terminal signals cannot interrupt bounded cleanup.
-            # An ambiguous prepare may have created an unstarted mission. Adopt
-            # only a new, matching prepared ID for cancellation, never for Start.
-            if self.mission_id is None and prepare_attempted and wanted is not None:
-                try:
-                    candidate = self.api.status()
-                    if (candidate.get("mission_id") and candidate["mission_id"] != prior_id
-                            and candidate.get("state") == "prepared" and self._matches(candidate, wanted)):
-                        self.mission_id = candidate["mission_id"]
-                except Exception:
-                    pass
-            if self.mission_id is not None and (final is None or not self._verified(final)):
-                try:
-                    final = self._stop_and_verify()
-                except Exception as exc:
-                    self.say(str(exc))
-                    final = None
-            if primary_error:
-                self.say(primary_error)
-        if final is not None:
-            try:
-                code = self._result(final)
-            except ClientError as exc:
-                self.say(str(exc))
-                code = 1
-            return 130 if interrupted else 1 if primary_error else code
+            self.cleaning = True
+            if error:
+                self.say(error)
+                if submitted:
+                    outcome = "Submitted mission status needs checking" if receipt else "Mission submission outcome unknown"
+                    identity = f" for mission {self.mission_id}" if self.mission_id else ""
+                    self.say(f"{outcome}{identity}. No retry or Stop was sent.")
+                    self.say("The Jetson may continue until its fixed deadline. Use 'status' or an explicit 'stop'.")
         return 130 if interrupted else 1
+
+    def watch(self):
+        """Display progress only. Losing or closing this display changes no authority."""
+        self.cleaning = False
+        self.say("Read-only watch. Closing this display does not stop an onboard mission.")
+        try:
+            while True:
+                cycle = self.clock()
+                current = self.api.status()
+                self._display(current)
+                if current.get("state") in TERMINAL:
+                    return self._result(current)
+                self.sleep(max(0., .25 - (self.clock() - cycle)))
+        except (KeyboardInterrupt, Cancelled):
+            self.say("Watch ended; an active Jetson mission continues. No Stop command was sent.")
+            return 130
+        except Exception as exc:
+            self.say(str(exc))
+            self.say("Watch disconnected. Mission authority remains on the Jetson; use 'status' or explicit 'stop'.")
+            return 1
 
     def stop_current(self):
         self.cleaning = True  # A stop operation itself must survive terminal termination signals.
@@ -403,14 +394,13 @@ def main(argv=None):
     status_parser = sub.add_parser("status", help="Read status without sending a command")
     status_parser.add_argument("--json", action="store_true", help="Print full diagnostic status")
     sub.add_parser("stop", help="Stop the current mission and verify zero-input status")
-    run = sub.add_parser("run", help="Prepare and execute one bounded mission")
+    sub.add_parser("watch", help="Read-only guidance; exit without stopping the mission")
+    run = sub.add_parser("run", help="Submit one person-search mission to the Jetson")
     run.add_argument("appearance")
-    run.add_argument("--percent", type=float, default=5)
-    run.add_argument("--seconds", type=int, default=10)
     run.add_argument("--hardware", action="store_true", help="Require a hardware service and interactive readiness")
     args = parser.parse_args(argv)
     try:
-        session = load_session(args.session, required=args.command != "status")
+        session = load_session(args.session, required=args.command not in ("status", "watch"))
         api = ApiClient(session)
         runner = TerminalMission(api)
         if args.command == "status":
@@ -419,7 +409,7 @@ def main(argv=None):
                 runner.say(json.dumps(value, indent=2))
             else:
                 preflight, motor = value.get("preflight", {}), value.get("motor", {})
-                runner.say(f"Mode: {value.get('mode', 'unknown')} | state: {value.get('state', 'unknown')} | operator: {value.get('operator', 'none')}")
+                runner.say(f"Mode: {value.get('mode', 'unknown')} | state: {value.get('state', 'unknown')} | mission owner: {value.get('mission_owner', 'unknown')}")
                 runner.say(f"Camera: {'ready' if preflight.get('camera_ready') else 'not ready'} | frame age: {value.get('perception', {}).get('frame_age_ms', 'unknown')} ms")
                 runner.say(f"IMU: {value.get('telemetry_mode', 'unknown')} | ready: {bool(preflight.get('telemetry_ready'))} | RX age: {preflight.get('telemetry_rx_age_ms', 'unknown')} ms")
                 runner.say(f"Motor input requested: {motor.get('requested_percent')}% | zero inputs confirmed: {bool(motor.get('zero_confirmed'))} | simulated: {value.get('mode') == 'observe'}")
@@ -434,7 +424,9 @@ def main(argv=None):
         with _signals(runner):
             if args.command == "stop":
                 return runner.stop_current()
-            return runner.run(args.appearance, args.percent, args.seconds, hardware=args.hardware)
+            if args.command == "watch":
+                return runner.watch()
+            return runner.run(args.appearance, hardware=args.hardware)
     except (ClientError, Cancelled, KeyboardInterrupt) as exc:
         print(str(exc) or "Interrupted", file=sys.stderr)
         return 1

@@ -22,6 +22,9 @@ import uuid
 
 ACTIVE = {"starting", "searching", "confirming", "saving"}
 TERMINAL = {"complete", "failed", "timed_out", "cancelled"}
+MISSION_PERCENT = 5.0
+MISSION_DURATION_MS = 60_000
+PREPARING_TIMEOUT_S = 15.0
 READINESS = {"guarded_stand", "hands_clear", "power_disconnect_accessible", "motors_still", "esc_startup_finished"}
 
 
@@ -30,10 +33,10 @@ class MissionSpec:
     mission_id: str
     appearance: str
     percent: float = 5.0
-    duration_ms: int = 10_000
+    duration_ms: int = MISSION_DURATION_MS
 
     @classmethod
-    def create(cls, appearance, percent=5.0, duration_ms=10_000):
+    def create(cls, appearance, percent=MISSION_PERCENT, duration_ms=MISSION_DURATION_MS):
         if not isinstance(appearance, str) or not 1 <= len(appearance.strip()) <= 240:
             raise ValueError("Describe visible clothing/accessories in 1–240 characters")
         if any(ord(c) < 32 or ord(c) == 127 for c in appearance.strip()):
@@ -113,6 +116,10 @@ class StandSupervisor:
         self.commands = queue.Queue(maxsize=16)
         self.lock = threading.Lock()
         self.stop_requested = threading.Event()
+        self._pending_mission = None
+        self._cancelled_pending = set()
+        self.prepare_deadline = None
+        self.pending_readiness = {}
         self._snapshot = {}
         self.spec = None
         self.state = "idle"
@@ -122,8 +129,6 @@ class StandSupervisor:
         self.perception_error = None
         self.source_epoch = None
         self.last_capture = self.last_processed = None
-        self.last_ui = None
-        self.lease_id = None
         self.started_mono = self.deadline = self.stopping_mono = None
         self.stage = None
         self.stage_started = None
@@ -139,30 +144,46 @@ class StandSupervisor:
         self._publish()
 
     def submit(self, message):
+        """Reserve one complete mission; clients cannot choose motor settings."""
         action = message.get("action")
-        if action not in {"prepare", "start", "stop", "lease"}:
-            raise ValueError("Unknown action")
-        if action == "prepare":
-            # Validation is cheap and provides immediate HTTP feedback.
-            MissionSpec.create(message.get("appearance"), message.get("percent", 5),
-                               message.get("duration_ms", 10_000))
-        if action in {"stop", "lease"}:
+        if action == "stop":
+            if set(message) - {"action", "mission_id"}:
+                raise ValueError("Unexpected command field")
             with self.lock:
-                current = self._snapshot.get("mission_id")
-                if message.get("mission_id") != current or current is None:
-                    raise ValueError("Mission does not match current session")
-                if action == "lease":
-                    if message.get("lease_id") != self.lease_id:
-                        raise ValueError("This mission belongs to a different operator client")
-                    self.last_ui = self.clock()
-                else:
+                requested = message.get("mission_id")
+                if self._pending_mission and requested == self._pending_mission:
+                    self._cancelled_pending.add(requested)
+                elif requested is not None and requested == self._snapshot.get("mission_id"):
                     self.stop_requested.set()
+                else:
+                    raise ValueError("Mission does not match current session")
             return {"accepted": True}
-        try:
-            self.commands.put_nowait(dict(message))
-        except queue.Full:
-            raise ValueError("Command queue full") from None
-        return {"accepted": True}
+        if action != "mission":
+            raise ValueError("Unknown action; submit a mission or stop it")
+        if set(message) - {"action", "appearance", "readiness"}:
+            raise ValueError("Mission input cannot set motor power or timing")
+        spec = MissionSpec.create(message.get("appearance"))
+        readiness = message.get("readiness", {})
+        if not isinstance(readiness, dict) or (readiness and
+                (set(readiness) != READINESS or any(v is not True for v in readiness.values()))):
+            raise ValueError("Confirm all five readiness observations")
+        if self.mode == "hardware" and set(readiness) != READINESS:
+            raise ValueError("Confirm guarded stand, hands clear, and accessible power disconnect")
+        if self.mode == "telemetry":
+            raise ValueError("Telemetry mode cannot run missions")
+        with self.lock:
+            if self.recovery_required:
+                raise ValueError("Stop was unverified: verify physical stopping and restart the service")
+            if self._pending_mission or self._snapshot.get("state") not in ({"idle"} | TERMINAL):
+                raise ValueError("A mission is already in progress")
+            self._pending_mission = spec.mission_id
+            try:
+                self.commands.put_nowait({"action": "mission", "spec": spec,
+                                         "readiness": dict(readiness), "submitted_mono": self.clock()})
+            except queue.Full:
+                self._pending_mission = None
+                raise ValueError("Command queue full") from None
+        return {"accepted": True, "mission_id": spec.mission_id}
 
     def snapshot(self):
         with self.lock:
@@ -196,7 +217,7 @@ class StandSupervisor:
     def _prepare(self, message):
         if self.recovery_required:
             raise ValueError("Stop was unverified: verify physical stopping and restart the service")
-        if self.state in ACTIVE or self.state == "stopping":
+        if self.state in ACTIVE or self.state in {"preparing", "stopping"}:
             raise ValueError("Stop the current mission before preparing another")
         if self.mode == "telemetry":
             raise ValueError("Telemetry mode only reads USB; start observation mode to rehearse")
@@ -205,9 +226,9 @@ class StandSupervisor:
             self.motor.close()
             self.motor = self.motor_factory()
             self.motor.start_background()
-        self.spec = MissionSpec.create(message.get("appearance"), message.get("percent", 5),
-                                       message.get("duration_ms", 10_000))
-        self.lease_id = None
+        self.spec = message.get("spec") or MissionSpec.create(
+            message.get("appearance"), message.get("percent", MISSION_PERCENT),
+            message.get("duration_ms", MISSION_DURATION_MS))
         self.state, self.error, self.guidance = "prepared", None, "hold"
         self.started_mono = self.deadline = self.stopping_mono = None
         self.stage = self.stage_started = self.pending_terminal = None
@@ -218,11 +239,13 @@ class StandSupervisor:
     def _start(self, message):
         if not self.spec or message.get("mission_id") != self.spec.mission_id:
             raise ValueError("Prepare and review this mission first")
-        if self.state != "prepared":
+        if self.state not in {"prepared", "preparing"}:
             raise ValueError("Start is accepted once per prepared mission")
         if self.mode == "hardware" and not all(message.get("readiness", {}).get(k) is True for k in READINESS):
             raise ValueError("Confirm guarded stand, hands clear, and accessible power disconnect")
         now = self.clock()
+        if self.state == "preparing" and now >= self.prepare_deadline:
+            raise ValueError("mission preflight deadline expired")
         if not self._fresh(now):
             raise ValueError("Waiting for fresh camera and detector progress")
         if not self.motor.snapshot().get("ready"):
@@ -231,13 +254,28 @@ class StandSupervisor:
             raise ValueError("Waiting for healthy read-only STM32 telemetry")
         if self.resource_error:
             raise ValueError(self.resource_error)
+        if self.memory_available_mib is None:
+            raise ValueError("Waiting for Jetson memory headroom measurement")
         if self.journal and self.journal.fault():
             raise ValueError(self.journal.fault())
-        self.started_mono, self.deadline, self.last_ui = now, now + self.spec.duration_ms / 1000, now
-        self.lease_id = message.get("lease_id")
-        self.state, self.error = "starting", None
-        self.motor.refresh_lease()
-        self.motor.start_all(self.spec.percent, self.spec.duration_ms)
+        # Serialize the final start decision with HTTP Abort admission. All motor
+        # methods here only update/enqueue bounded in-memory state, never do I/O.
+        with self.lock:
+            cancelled = (self.spec.mission_id in self._cancelled_pending
+                         or self.stop_requested.is_set())
+            if not cancelled:
+                now = self.clock()
+                if self.state == "preparing" and now >= self.prepare_deadline:
+                    raise ValueError("mission preflight deadline expired")
+                if not self._fresh(now):
+                    raise ValueError("Waiting for fresh camera and detector progress")
+                self.started_mono, self.deadline = now, now + self.spec.duration_ms / 1000
+                self.state, self.error = "starting", None
+                self.motor.refresh_lease()
+                self.motor.start_all(self.spec.percent, self.spec.duration_ms)
+        if cancelled:
+            self._stop("operator stop", "cancelled")
+            return
         self._audit("start_requested", settings=asdict(self.spec))
 
     def _stop(self, reason, terminal):
@@ -248,8 +286,9 @@ class StandSupervisor:
         if self.state in TERMINAL:
             return
         if self.state not in ACTIVE:
-            if self.state == "prepared":
-                self.state, self.error = "cancelled", reason
+            if self.state in {"prepared", "preparing"}:
+                self.state, self.error = terminal, reason
+                self._audit("mission_ended_before_start", reason=reason, terminal=terminal)
             return
         # Revoke motor authority before any queue, file, model or HTTP operation.
         self.motor.stop(reason)
@@ -278,8 +317,6 @@ class StandSupervisor:
             return fault, "failed"
         if now >= self.deadline:
             return "mission time limit", "timed_out"
-        if self.last_ui is None or now - self.last_ui > 1:
-            return "operator connection lost or inactive", "failed"
         if not self._fresh(now):
             return "camera or detector progress stale", "failed"
         if motor.get("error") or motor.get("fault") or motor.get("start_status") == "failed":
@@ -367,22 +404,39 @@ class StandSupervisor:
         if self.stop_requested.is_set():
             self.stop_requested.clear()
             self._stop("operator stop", "cancelled")
-        # Bound work per tick so requests cannot starve the motor lease/watchdogs.
-        for _ in range(4):
-            was_active = self.state in ACTIVE
+        # One reserved request starts autonomously after bounded onboard preflight.
+        try:
+            message = self.commands.get_nowait()
+        except queue.Empty:
+            message = None
+        if message is not None:
             try:
-                message = self.commands.get_nowait()
-            except queue.Empty:
-                break
-            try:
-                if message["action"] == "prepare":
-                    self._prepare(message)
-                elif message["action"] == "start":
-                    self._start(message)
+                self._prepare(message)
+                self.state = "preparing"
+                self.prepare_deadline = message["submitted_mono"] + PREPARING_TIMEOUT_S
+                self.pending_readiness = message["readiness"]
             except (ValueError, RuntimeError) as exc:
+                self.spec = message["spec"]
                 self.error = str(exc)
-                if self.state in ACTIVE and not was_active:
-                    self._stop(self.error, "failed")
+                self.state = "failed"
+        with self.lock:
+            cancelled = self.spec and self.spec.mission_id in self._cancelled_pending
+            if cancelled:
+                self._cancelled_pending.discard(self.spec.mission_id)
+        if cancelled:
+            self._stop("operator stop", "cancelled")
+        if self.state == "preparing":
+            if now >= self.prepare_deadline:
+                self._stop("mission preflight timed out: " + (self.error or "not ready"), "failed")
+            elif self.perception_error:
+                self._stop(self.perception_error, "failed")
+            else:
+                try:
+                    self._start({"mission_id": self.spec.mission_id, "readiness": self.pending_readiness})
+                except (ValueError, RuntimeError) as exc:
+                    self.error = str(exc)
+                    if self.state in ACTIVE:
+                        self._stop(self.error, "failed")
         motor = self.motor.snapshot()
         if self.state in ACTIVE:
             failure = self._active_failure(now, motor)
@@ -424,9 +478,10 @@ class StandSupervisor:
                                if isinstance(received, (int, float)) and math.isfinite(received)
                                else None)
         status = {"mode": self.mode, "state": self.state, **settings,
-                  "operator": "terminal" if self.lease_id is not None else "dashboard",
+                  "operator": "jetson", "mission_owner": "jetson", "control_authority": "onboard",
                   "error": self.error, "guidance": self.guidance,
-                  "lease_required": self.state in ACTIVE,
+                  "lease_required": False, "mission_api": 2,
+                  "mission_profile": {"percent": MISSION_PERCENT, "duration_ms": MISSION_DURATION_MS},
                   "remaining_ms": max(0, int((self.deadline - now) * 1000)) if self.deadline else None,
                   "motor": motor, "imu": telemetry.get("telemetry", {}),
                   "telemetry_mode": "live_read_only" if self.observer or self.mode == "telemetry"
@@ -450,6 +505,8 @@ class StandSupervisor:
                   "evidence_available": bool(self.evidence and self.state in TERMINAL), "result": self.result}
         with self.lock:
             self._snapshot = status
+            if self._pending_mission and self.spec and self.spec.mission_id == self._pending_mission:
+                self._pending_mission = None
 
     def evidence_image(self, mission_id):
         result = self.finished_missions.get(mission_id)

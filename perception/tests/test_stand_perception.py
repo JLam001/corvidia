@@ -14,7 +14,9 @@ from PIL import Image
 from corvidia_perception import evidence
 from corvidia_perception.cosmos import APPEARANCE_SYSTEM, LlamaCppBackend, LlamaCppConfig, validate_appearance
 from corvidia_perception.records import ConfirmRequest, Frame, FrameInfo, ClockDomain
-from corvidia_perception.stand_perception import EventSink, ManualGuidance, _begin_values
+from corvidia_perception.stand_perception import (
+    EventSink, ManualGuidance, _begin_values, _stand_pipeline_config,
+)
 
 from conftest import person
 
@@ -24,6 +26,30 @@ def drain(q):
     while not q.empty():
         result.append(q.get_nowait())
     return result
+
+
+def test_stand_omits_extra_best_shots_but_commits_primary_frame_and_crop(tmp_path, harness):
+    from corvidia_perception.config import PipelineConfig
+
+    cfg = _stand_pipeline_config("~/models/yolo11n.engine", tmp_path / "stand-events")
+    assert cfg.best_shot.enabled is False
+    assert PipelineConfig().best_shot.enabled is True  # General pipeline is unchanged.
+    assert cfg.storage.save_frame is True
+    assert cfg.storage.root == tmp_path / "stand-events"
+    assert cfg.detector.model == "~/models/yolo11n.engine"
+    assert cfg.depth.enabled is False and cfg.freespace.hz == 0
+    assert cfg.confirm.deadline_s == 4 and cfg.queue.max_pending == 1
+    notices = queue.Queue(maxsize=16)
+    h = harness(cfg=cfg, appearance="wearing a red shirt", observer_queue=notices)
+    assert h.pipe.best is None
+    h.frames(3, person(1))
+    event = h.events()[0]
+    directory = h.session_dir / event["event_id"]
+    assert (directory / "frame.jpg").is_file()
+    assert (directory / "crop.jpg").read_bytes() == h.backend.requests[0].image_jpeg
+    assert drain(notices)[-1]["committed"] is True
+    h.pipe.stop()
+    assert not (directory / "best.jpg").exists()
 
 
 @pytest.mark.parametrize("value", [None, "", "   ", "x" * 241, "red\nshirt", "red\x00shirt"])

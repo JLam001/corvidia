@@ -5,7 +5,6 @@ from __future__ import annotations
 import hmac
 import ipaddress
 import json
-import math
 from pathlib import Path
 import secrets
 import socket
@@ -21,51 +20,27 @@ _READINESS = ("guarded_stand", "hands_clear", "power_disconnect_accessible",
 
 def _command(action: str, body: dict) -> dict:
     """Validate HTTP input before it enters the supervisor's bounded queue."""
-    if action == "prepare":
-        if set(body) - {"appearance", "percent", "duration_ms"}:
-            raise ValueError("Unexpected preparation field")
+    if action == "mission":
+        if set(body) - {"appearance", "readiness"}:
+            raise ValueError("Mission input cannot set motor power or timing")
         appearance = body.get("appearance", "")
-        percent = body.get("percent", 5)
-        duration = body.get("duration_ms", 10000)
-        if not isinstance(appearance, str) or not appearance.strip() or len(appearance) > 240:
+        if not isinstance(appearance, str) or not 1 <= len(appearance.strip()) <= 240:
             raise ValueError("Describe the person's visible appearance in 1–240 characters")
         if any(ord(c) < 32 or ord(c) == 127 for c in appearance.strip()):
             raise ValueError("Use a single-line appearance description without control characters")
-        if type(percent) not in (int, float) or not math.isfinite(percent) or not 0 < percent <= 20:
-            raise ValueError("Motor input must be greater than 0 and at most 20 percent")
-        if type(duration) is not int or not 1000 <= duration <= 60000:
-            raise ValueError("Duration must be an integer between 1000 and 60000 milliseconds")
-        return dict(action=action, appearance=appearance.strip(), percent=percent,
-                    duration_ms=duration)
-    if action not in ("start", "stop", "lease"):
+        readiness = body.get("readiness", {})
+        if not isinstance(readiness, dict) or (readiness and
+                (set(readiness) != set(_READINESS) or any(v is not True for v in readiness.values()))):
+            raise ValueError("Confirm all five readiness observations")
+        return dict(action=action, appearance=appearance.strip(), readiness=dict(readiness))
+    if action != "stop":
         raise ValueError("Unknown command")
-    allowed = ({"mission_id", "readiness", "lease_id"} if action == "start" else
-               {"mission_id", "lease_id"} if action == "lease" else {"mission_id"})
-    if set(body) - allowed:
+    if set(body) - {"mission_id"}:
         raise ValueError("Unexpected command field")
     mission_id = body.get("mission_id")
     if not isinstance(mission_id, str) or not 1 <= len(mission_id) <= 128:
         raise ValueError("A current mission ID is required")
-    event = dict(action=action, mission_id=mission_id)
-    if "lease_id" in body:
-        lease_id = body["lease_id"]
-        if (not isinstance(lease_id, str) or not 16 <= len(lease_id) <= 96
-                or not all(c.isascii() and (c.isalnum() or c in "_-") for c in lease_id)):
-            raise ValueError("A valid operator lease ID is required")
-        event["lease_id"] = lease_id
-    if action == "start":
-        readiness = body.get("readiness", {})
-        if readiness == {}:
-            # Observation mode needs no physical assertions. The supervisor
-            # alone knows its immutable mode and rejects this in hardware mode.
-            event["readiness"] = {}
-            return event
-        if not isinstance(readiness, dict) or set(readiness) != set(_READINESS):
-            raise ValueError("All five readiness observations are required")
-        if any(readiness[key] is not True for key in _READINESS):
-            raise ValueError("Confirm all readiness observations before starting")
-        event["readiness"] = dict(readiness)
-    return event
+    return dict(action=action, mission_id=mission_id)
 
 
 class StandWebServer:
@@ -188,7 +163,7 @@ class StandWebServer:
                 if not self._trusted(mutation=True):
                     return
                 target = urlsplit(self.path)
-                if target.query or target.path not in ("/api/prepare", "/api/start", "/api/stop", "/api/lease"):
+                if target.query or target.path not in ("/api/mission", "/api/stop"):
                     self._json(404, {"error": "Not found"})
                     return
                 if self.headers.get_content_type() != "application/json":

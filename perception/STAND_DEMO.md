@@ -2,23 +2,59 @@
 
 This demo joins the Jetson camera, YOLO, Cosmos, saved evidence, and the STM32's
 bounded all-four motor interface. The operator describes a person's visible
-appearance, prepares the mission, then starts it. The screen gives turning and
+appearance and submits one mission. The screen gives turning and
 hold instructions; the operator turns the guarded stand using its external
 handle. A confirmed, saved image ends the mission and requests zero motor input.
+The Jetson owns the complete mission after Start. The Mac is an optional debug
+and command terminal; the mission continues if that connection closes.
 
-This is a stand demonstration. All four motors receive the same operator-selected
+This is a stand demonstration. All four motors receive the same fixed demo
 input. Guidance changes what the operator does with the stand; it does not send
 flight-controller movement commands.
 
-## Modes and limits
+## Current headless setup
+
+The validated hardware backend remains running on the Jetson with its last
+mission completed. The operator confirmed that all four motors stopped and
+unplugged the ESC battery. No new mission starts automatically. Use the
+[maintenance terminal commands](#maintenance-terminal-commands) to inspect
+status, watch guidance, explicitly submit another mission, or stop one. The
+backend stays running when the terminal or SSH connection closes; the STM32
+firmware remains v5. A future powered run requires fresh readiness confirmation.
+
+## Launch the native console on the Jetson
+
+Open a terminal on the Jetson desktop:
+
+```sh
+cd ~/corvidia/perception
+./deploy/stand-console.sh
+```
+
+This opens the native `corvidia-console` window with a live camera view, person
+appearance prompt, mission status, manual turn/HOLD guidance, saved-image result,
+and explicit Stop. There are no motor-input or duration controls. Enter a visible
+description such as **person wearing a red shirt**, then submit the mission once.
+
+The launcher starts the backend in observation mode if it is inactive. It keeps
+an existing service running and refuses a mode mismatch. With an already running
+service, `.venv/bin/corvidia-console` launches the same window directly. The
+Jetson desktop Python environment needs Tkinter and Pillow for the window.
+
+For a separately commissioned hardware-mode service, use
+`./deploy/stand-console.sh --hardware`. It requires that service to be active
+already and presents the five physical readiness checks for each mission. The
+launcher never switches an observation service into hardware mode.
+
+## Modes and fixed demo profile
 
 | Mode | Camera and Cosmos | STM32 | Start button |
 | --- | --- | --- | --- |
 | `observe` | Real perception | Simulated motors; optional read-only IMU | Runs the mission without motor output |
 | `telemetry` | Status/preflight | Read-only MAVLink | Disabled |
-| `hardware` | Real perception | Explicit bounded motor interface | Available after preparation and readiness checks |
+| `hardware` | Real perception | Explicit bounded motor interface | Available after readiness checks |
 
-Hardware mode is selected when launching the service; the web page cannot turn
+Hardware mode is selected when launching the service; the console cannot turn
 an observation service into a hardware service.
 
 Start with `uv run corvidia-stand --mode observe`. Add `--port` with the STM32's
@@ -28,14 +64,13 @@ simulated. Use `--mode telemetry --port /dev/serial/by-id/DEVICE` for the dedica
 read-only check. Hardware commissioning uses a separately launched `--mode hardware`
 service with that serial path.
 
-- Mission motor input: greater than zero, at most **20%**; default **5%**.
-- Fixed maximum duration: **1–60 seconds**; default **10 seconds**.
-- The LLM does not select motor input, extend the deadline, or authorize Start.
-- Installed v5 firmware supports a broader protocol range up to 100%; this
-  stand application deliberately caps its own requests at 20%.
-- Input percentage is neither measured RPM nor electrical power. Previous
-  successful bench runs do not establish thermal or mechanical limits for
-  every duration, especially with propellers installed.
+The onboard demo profile is fixed internally at **5% equal motor input** with a
+**60-second deadline**. A matching saved capture normally stops the mission
+before that limit. User interfaces and mission packets accept a person
+description and hardware readiness observations; they accept no power or timing
+overrides. The model cannot change this profile, extend a run, or authorize a
+new mission. Percentage is requested input, not measured RPM or electrical power.
+The installed v5 firmware remains unchanged.
 
 ## Connection and deployment
 
@@ -69,8 +104,15 @@ The wrapper creates a temporary `corvidia-stand.service` under the current user'
 systemd manager. It has **no automatic restart and no boot enablement**. An
 existing active service is refused rather than replaced. Stop sends the normal
 service shutdown signal and allows 15 seconds for cleanup; it does not use a
-broad process-name kill. Starting the service leaves motors idle until a prepared
-mission receives an explicit Start.
+broad process-name kill. Starting the service leaves motors idle until an explicit
+mission submission passes the onboard preflight checks.
+
+The Jetson user manager must have lingering enabled so an SSH logout does not
+terminate the service. This has been configured for `jlam`; verify with
+`loginctl show-user jlam -p Linger`. On another installation, run
+`loginctl enable-linger USERNAME` once. The wrapper checks this before starting.
+Lingering preserves the user manager across logouts; the temporary stand unit
+still has no boot enablement or automatic mission restart.
 
 When exactly one matching Feather F405 (`0483:5740`) is present, the wrapper
 selects its stable USB path automatically. In observation mode this adds real,
@@ -91,8 +133,8 @@ keep that token out of shared logs, screenshots, and repository files.
 The wrapper reads the Jetson's volatile journal by user-unit name and current
 UID, so it also works when separate per-user journal files are unavailable.
 
-The dashboard listens only on the Jetson loopback interface. Forward its port
-through SSH, using the same local and remote port:
+The dashboard listens only on the Jetson loopback interface. For an optional
+Mac debug view, forward its port through SSH, using the same local and remote port:
 
 ```sh
 ssh -N -L 8080:127.0.0.1:8080 JETSON_SSH_ALIAS
@@ -110,77 +152,100 @@ the operator link. Reopening without the token gives a view without controls.
 2. Check telemetry with ESC power disconnected. Confirm the v5 firmware identity,
    fresh IMU, idle state, zero requested inputs, and the expected capabilities.
 3. Complete the separate guarded-stand commissioning checks before using
-   hardware mode. The reported setup has propellers installed; software cannot
-   verify the guard, restraint, external handle, or power disconnect. Nobody
+   hardware mode. The validated hardware test used removed propellers and
+   secured motors. Software cannot verify the guard, restraint, external handle,
+   or power disconnect. Nobody
    turns or approaches the drone directly while motors are energized.
-4. In the hardware dashboard, enter the person's visible appearance, motor input,
-   and maximum duration. A visible appearance description is required.
-   Select **Prepare mission** and review the target and preflight status.
+4. In the native console, enter the person's visible appearance and review the
+   target and preflight status. The service supplies the fixed demo profile;
+   there are no power or timing fields.
 5. Confirm all five readiness observations. Start only with startup complete,
    all motors still, and the guarded area clear. Use the external handle to
    follow the displayed guidance; hold still while confirmation completes.
-6. A saved confirmation, timeout, operator stop, or fault ends the run. **Stop**
-   and the **Escape** key request zero input. Fresh zero-input telemetry is
-   separate from physical stopping: observe the motors before approaching.
+6. A saved confirmation, deadline, operator stop, or fault ends the run. Use
+   **Stop** to request zero input. Fresh zero-input telemetry is separate from
+   physical stopping: observe the motors before approaching.
 
-Keep the dashboard visible. It renews the operator lease every 250 ms; the
-supervisor's one-second lease expires if the connection or page stalls. Hiding
-or closing the page sends a best-effort stop, and a hidden page stops renewing
-the lease. An ended mission does not automatically restart when the page or
-hardware reconnects. If zero-input stop verification fails, new missions are
+The onboard supervisor maintains the motor watchdog while its camera, model,
+storage, and serial checks remain healthy. Closing the console, dashboard, terminal, SSH,
+or Ethernet connection does not stop a started mission. Use explicit **Stop**
+to end it early; a matching capture, fault, or the fixed deadline also ends it.
+An ended mission does not automatically restart when a client or hardware
+reconnects. If zero-input stop verification fails, new missions are
 blocked until the operator recovers the physical setup and restarts the service.
 
-## Terminal operation
+## Maintenance terminal commands
 
-The terminal client works without the browser. The preferred Mac or Linux
-workflow runs the client **locally**, with its operator lease passing through
-the Ethernet connection. Local Python 3.12 or newer and the verified
-`corvidia-jetson` SSH alias are required. From the repository root:
-
-```sh
-./perception/deploy/stand-terminal.sh status
-./perception/deploy/stand-terminal.sh run "person wearing a red shirt" --percent 5 --seconds 10
-./perception/deploy/stand-terminal.sh stop
-```
-
-For `run`, the wrapper creates its own loopback-only port-8080 SSH tunnel. Close
-any known existing port-8080 tunnel first; a new run refuses to reuse an unknown
-listener. It reads the Jetson service's private
-`~/.local/state/corvidia/stand-8080.json` into a temporary mode-600 local file.
-The operator token stays out of command arguments and printed output. On exit,
-the wrapper removes that file and closes only its own SSH connection.
-
-`status` and `stop` use one-shot SSH commands on the Jetson and renew no lease.
-They work from a second terminal while `run` owns the local tunnel. Those fixed
-commands use the current deployment at `~/corvidia/perception`; `status --json`
-prints the status as JSON.
-
-`run` prepares and displays the description and limits for review. Follow the
-terminal's confirmation prompts, then its manual turn/HOLD guidance. Ctrl+C
-requests stop; the separate `stop` command also works. Signal cleanup keeps the
-tunnel open for up to five seconds while the client verifies zero inputs, then
-closes it. The terminal owns its lease through a unique `lease_id` and
-`operator="terminal"`: an open dashboard cannot renew that lease or stop it
-merely by being hidden. The dashboard's explicit **Stop** remains available.
-An Ethernet or terminal failure stops lease renewal; the supervisor expires
-the run after one second. A reconnect never restarts a mission.
-
-The terminal uses the same **20% input / 60-second maximum** as the dashboard.
-For an already commissioned hardware-mode service, add `--hardware` to `run`
-and complete its readiness confirmations. That flag does not change service
-mode. Observation mode retains simulated motor output.
-
-Direct operation in a terminal on the Jetson is also supported, from its
+The text client is an alternative for maintenance on the Jetson. From the
 deployment's `perception` directory:
 
 ```sh
-.venv/bin/python -m corvidia_perception.stand_cli --session ~/.local/state/corvidia/stand-8080.json status
-.venv/bin/python -m corvidia_perception.stand_cli --session ~/.local/state/corvidia/stand-8080.json run "person wearing a red shirt" --percent 5 --seconds 10
+.venv/bin/python -m corvidia_perception.stand_cli status
+.venv/bin/python -m corvidia_perception.stand_cli run "person wearing a red shirt"
+.venv/bin/python -m corvidia_perception.stand_cli watch
+.venv/bin/python -m corvidia_perception.stand_cli stop
 ```
 
-Use the local wrapper when operating from the Mac. A client launched remotely
-over SSH may keep renewing its lease on the Jetson until SSH notices a lost
-connection; the local wrapper's lease must cross Ethernet on every renewal.
+`run` completes the applicable readiness checks, submits one appearance-only
+mission request, and returns its accepted mission ID. The receipt does not
+confirm motor motion. The onboard service performs preflight and then
+handles detection, appearance confirmation, capture, and motor supervision.
+The command returning or its SSH connection closing does not stop that mission.
+The same internal demo profile applies. A matching committed capture, fault,
+explicit stop, or the fixed deadline ends the run. An ambiguous response is
+reported without retrying or issuing an automatic Stop. No separate preparation
+or start command is sent, and no STM32 firmware change is needed.
+
+`watch` displays status and manual turn/HOLD guidance. Ctrl+C exits only the
+watcher. Use the explicit `stop` command or dashboard **Stop** to request zero
+input. Stopping a watcher or unplugging Ethernet is not an emergency-stop
+command; keep the physical power disconnect accessible.
+
+For a commissioned hardware-mode service, add `--hardware` to `run` and complete
+its interactive readiness confirmations. The flag does not change the service
+mode. Observation mode retains simulated motor output. The private operator
+session at `~/.local/state/corvidia/stand-8080.json` stays on the Jetson; the CLI
+reads it without putting its token in command arguments or printed output.
+
+### Headless operation
+
+The backend and text client can run with the Jetson desktop logged out. The
+native camera console needs a desktop session. Save desktop work before logging
+out; the managed backend stays running through the user manager's lingering
+setting. Use the onboard maintenance commands, optionally through the Mac's
+SSH wrapper, to submit, watch, or stop a headless mission. The mission and its
+watchdogs still run entirely on the Jetson.
+
+In the validated setup, logging out the desktop increased available memory from
+about 1.4 GiB to 1.9 GiB. The existing **1536 MiB** memory guard was unchanged.
+The guard still applies to every mission; headless operation does not bypass
+preflight or hardware readiness checks.
+
+The backend's systemd unit removes `DISPLAY`, `WAYLAND_DISPLAY`, and
+`XAUTHORITY` from its environment. A lingering user manager can retain these
+variables after desktop logout; stale display settings caused Argus to fail
+with `Failed to initialize EGLDisplay` on restart. Removing them restored real
+camera startup headlessly. The separate native console keeps its desktop display
+environment.
+
+### Optional Mac debug terminal
+
+The local wrapper simply launches the same onboard commands over the verified
+`corvidia-jetson` SSH alias. It needs local `python3` to quote arguments safely:
+
+```sh
+./perception/deploy/stand-terminal.sh status
+./perception/deploy/stand-terminal.sh run "person wearing a red shirt"
+./perception/deploy/stand-terminal.sh watch
+./perception/deploy/stand-terminal.sh stop
+```
+
+The wrapper defaults to `status`. It creates no forwarding tunnel, copies no
+operator token, and runs no local mission or watchdog loop. Arguments reach
+`~/corvidia/perception` literally, including spaces and quotes in descriptions.
+Hardware readiness requires a real interactive terminal; only that command
+requests an SSH TTY. `watch` is read-only, and its disconnection leaves the
+onboard mission running. The explicit `stop` command works from another terminal.
 
 ## Completion and evidence
 
@@ -210,20 +275,19 @@ requests are rejected. JSON request bodies are limited to 4096 bytes.
 | --- | --- |
 | `GET /api/status` | Current supervisor snapshot |
 | `GET /frame.jpg` | Latest preview JPEG, or 503 while waiting |
-| `POST /api/prepare` | `appearance`, `percent`, `duration_ms` |
-| `POST /api/start` | `mission_id`, `readiness` |
+| `POST /api/mission` | `appearance`, optional hardware `readiness`; returns `accepted` and new `mission_id` |
 | `POST /api/stop` | `mission_id` |
-| `POST /api/lease` | `mission_id` |
 | `GET /api/evidence?mission_id=…` | Authorized committed image; requires token header |
 
-Start readiness contains exactly `guarded_stand`, `hands_clear`,
+Mission readiness contains exactly `guarded_stand`, `hands_clear`,
 `power_disconnect_accessible`, `motors_still`, and `esc_startup_finished`, each
 the JSON boolean `true` for hardware mode. Observation mode omits physical
 assertions; the supervisor enforces readiness according to its immutable mode.
-The UI clears these
-observations after preparation and starting. Commands enqueue
-`{"action": "prepare|start|stop|lease", ...}` and return 202; this acknowledges
-queue admission, not motor motion or a completed mission. Check status afterward.
+The console clears these observations after submission. Mission requests accept
+no extra fields, including power or duration overrides. The old prepare/start
+endpoints are retired. Commands enqueue `{"action": "mission|stop", ...}` and
+return 202; this acknowledges queue admission, not motor motion or a completed
+mission. Check the returned mission ID in subsequent status.
 
 ## Validation before a powered demonstration
 
@@ -235,14 +299,19 @@ establishes the existing event behavior, not stand-control readiness. Validate:
   supervisor loss, and serial loss end the run without automatic restart.
 - Duplicate Start and repeated packets cannot extend or revive the fixed run.
 - Missing token, wrong Host/Origin, oversized input, malformed readiness, and
-  input above 20% never reach the supervisor command queue.
+  any power or timing override never reaches the supervisor command queue.
 - Run the real camera/Cosmos workflow in observation mode, then inspect fresh
   read-only USB telemetry with motor power disconnected.
 - Separately commission the guarded hardware setup. Record the requested input,
   duration, capture-to-stop latency, ACK, fresh zero telemetry, and the operator's
   physical stop observation. A test remains incomplete without that observation.
 
-## Integration validation — 2026-09-27
+## Integration validation — 2026-09-27 (earlier architecture)
+
+These records describe the earlier externally leased implementation. The
+operator-lease behavior is superseded by onboard mission ownership; these checks
+do not establish the new disconnect behavior. Camera, model, and read-only
+firmware observations remain historical evidence.
 
 The integration includes upstream `perception-pipeline` commit `f0cf748` (tracks
 publisher and bridge). The Jetson release lives at
@@ -268,8 +337,8 @@ direct GitHub authentication on the Jetson is still unconfigured.
   cannot be hidden by a matching capture. Evidence records distinguish frame
   capture-to-stop time from evidence commit-to-stop time.
 
-Still pending: a person in the live camera view for the matching description,
-committed-image, and simulated early-stop rehearsal; visual browser inspection;
+At that time, still pending were a person in the live camera view for the
+matching-description, committed-image, and simulated early-stop rehearsal; visual browser inspection;
 and separate guarded hardware commissioning. No motor commands were sent during
 this integration validation. Browser inspection was blocked by denied browser
 access to the local dashboard.
@@ -284,8 +353,8 @@ Commit `f0cf748` is included in this checkout and on the Jetson. Its
 [`corvidia_bridge.py`](bridge/corvidia_bridge.py) publishes perception data to
 the separate `autodrone` framework: tracks, free space, health, captures, and
 optional preview frames. It has no serial connection or motor command handling.
-The terminal client controls the existing stand supervisor through its operator
-API. That supervisor remains the single owner of the STM32 connection.
+The native console and maintenance terminal submit to the stand supervisor
+through its local operator API. That supervisor remains the single owner of the STM32 connection.
 
 The external `autodrone` project is not installed on this Jetson, and its flight
 controller command contract has not been inspected. Before enabling that path:
@@ -306,8 +375,8 @@ controller command contract has not been inspected. Before enabling that path:
   README's example defaults to the stub confirmer and produces unverified
   captures.
 
-Keep one component responsible for motor authority, fixed deadlines, operator
-leases, and stop verification when integrating the external mission framework.
+Keep the onboard supervisor responsible for motor authority, fixed deadlines,
+health watchdogs, and stop verification when integrating the external mission framework.
 
 ### Link to the tested STM32 firmware
 
@@ -318,13 +387,17 @@ sets that run's envelope, and sends the existing all-four MAVLink bench command.
 A committed matching capture, stop request, fault, or deadline ends that run.
 The MCU's own watchdogs remain responsible for enforcing output limits.
 
-The terminal, dashboard, and a future external mission adapter must use this
+The console, maintenance clients, and a future external mission adapter must use this
 single supervisor. The model may supply target judgments and manual turn cues;
 it does not select raw motor output, extend an active run, or authorize a new
 start. This stand path requires no STM32 firmware update. Autonomous flight
 control remains outside the tested bench interface.
 
-### Terminal validation — 2026-09-27
+### Terminal validation — 2026-09-27 (superseded client-owned runs)
+
+The private-tunnel, lease, and Ctrl+C-stop workflow below was tested before the
+move to onboard missions. Current `run` and `watch` semantics are documented
+above; these results do not validate them.
 
 - **262 tests passed; 7 GPU/camera tests excluded** on the Jetson, including
   terminal-to-HTTP-to-supervisor tests with simulated motors.
@@ -336,4 +409,75 @@ control remains outside the tested bench interface.
 - The real STM32 stayed in read-only mode: `DS_TOKEN=1`, `DS_ACTIVE=0`, and all
   four reported motor inputs were zero. Its v5 firmware was not modified.
 - No matching-person capture was completed in these terminal runs. That live
-  rehearsal and separate powered stand commissioning remain pending.
+  rehearsal and separate powered stand commissioning were still pending then.
+
+## Onboard mission validation — 2026-09-27
+
+The current single-submit API completed a real observation mission after the
+operator authorized desktop logout. The console process and desktop session
+were closed; the managed backend survived through lingering. Available memory
+rose from about 1.4 GiB to 1.9 GiB without reducing the 1536 MiB guard. The onboard
+text client submitted the mission through SSH, with the Mac acting only as a
+debug terminal.
+
+- Mission `5d41d2ef26fb42d9aeacf7f7eba040ba` detected and confirmed a real person,
+  committed `frame.jpg`, `crop.jpg`, and `event.json`, and completed with a
+  simulated motor stop.
+- Evidence commit to simulated stop took **23.5 ms**; source frame capture to
+  simulated stop took **1977 ms**. These are observation-mode timings, not
+  measurements of physical motor stopping.
+- Read-only telemetry from the real STM32 still reported zero requested input
+  on all four motors, with `DS_TOKEN=1`. The firmware was unchanged.
+- Native-console display checks cover a 1920×1080 desktop and a compact
+  560×390 window. Mocked display checks establish layout and controls, not
+  powered operation.
+
+Evidence is on the Jetson under:
+
+```text
+~/corvidia-data/stand-events/stand-64ff44db077741d2b279096f9cf317c1/6231a015-41a0-431d-82a7-9981d4b20083/
+```
+
+The operator confirmed propellers removed and motors secured for the next
+hardware test. A fresh headless hardware-service restart passed preflight with
+ESC power disconnected: real firmware v5, `IMU_OK=1`, `DS_FAULT=0`,
+`DS_ACTIVE=0`, all four requested inputs zero, `DS_TOKEN=1`, a fresh camera,
+and about 1741 MiB available memory. This also verified the service environment
+fix for Argus after desktop logout.
+
+### Powered full-pipeline result
+
+After physical readiness confirmation, hardware mission
+`8fcb310874374742ab775261f8964611` completed the full person-search workflow:
+fixed **5% input**, real camera/YOLO/Cosmos confirmation, committed evidence,
+and automatic motor stop. The fixed 60-second maximum remained in force; the
+matching capture ended the run earlier. The operator confirmed that all four
+motors ran smoothly and stopped automatically, then unplugged the ESC battery.
+
+| Measurement | Result |
+| --- | --- |
+| Motor start to stop command | 20.8375 s |
+| Stop acknowledgement latency | 9.57 ms |
+| Motor start to fresh zero-input telemetry | 21.4679 s |
+| Evidence commit to stop request | 15.29 ms |
+| Source frame capture to stop request | 1630.61 ms |
+| Lowest sampled available memory | 1693.05 MiB |
+| Highest sampled frame age | 95.8 ms |
+
+Fresh telemetry confirmed zero requested inputs on all four motors,
+`DS_ACTIVE=0`, and `DS_FAULT=0`. Every sampled IMU report had `IMU_OK=1`.
+The timing measurements describe software commands, acknowledgements, and
+telemetry; the operator separately confirmed physical stopping. This validates
+the props-off stand workflow at the fixed demo input, without establishing
+autonomous-flight readiness or propeller-loaded behavior.
+
+The committed `frame.jpg`, `crop.jpg`, and `event.json` are on the Jetson in:
+
+```text
+~/corvidia-data/stand-events/stand-7715660e874f43aea53d9006289e7de3/bcfcd659-9fb2-469f-93b6-9d9d07a4066e/
+```
+
+The run audit is
+`~/corvidia-data/integration/headless-full-pipeline-hardware.json`.
+The hardware backend remains running in its completed state with no automatic
+mission restart; ESC power is disconnected. The STM32 firmware was unchanged.

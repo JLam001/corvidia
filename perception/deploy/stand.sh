@@ -49,6 +49,9 @@ case "$action" in
     [[ -x "$python" ]] || fail "Python environment missing: $python"
     command -v systemd-run >/dev/null || fail 'systemd-run is unavailable.'
     command -v udevadm >/dev/null || fail 'udevadm is required to identify the USB controller.'
+    command -v loginctl >/dev/null || fail 'loginctl is required to verify onboard service lifetime.'
+    linger=$(loginctl show-user "$(id -u)" --property=Linger --value)
+    [[ $linger == yes ]] || fail "Enable service lifetime independent of SSH first: loginctl enable-linger $(id -un)"
 
     serial=${3:-}
     if [[ -n $serial ]]; then
@@ -85,6 +88,7 @@ PY
     systemd-run --user --unit="$unit" --description='Corvidia stand mission' \
       --collect --service-type=exec --property="WorkingDirectory=$project_dir" \
       --property=Restart=no --property=TimeoutStopSec=15s \
+      --property='UnsetEnvironment=DISPLAY WAYLAND_DISPLAY XAUTHORITY' \
       --setenv=PYTHONUNBUFFERED=1 -- "${args[@]}"
     printf 'Stand service launched in %s mode. Motors require an explicit mission start.\n' "$mode"
     printf '%s\n' 'Run deploy/stand.sh logs for the private operator link; do not publish that token.'

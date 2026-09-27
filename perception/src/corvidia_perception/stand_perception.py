@@ -121,6 +121,24 @@ def _begin_values(command: dict) -> tuple[str, str, float, dict]:
     return mission_id, appearance, float(started), dict(extra)
 
 
+def _stand_pipeline_config(model: str, root: Path):
+    from .config import PipelineConfig
+
+    cfg = PipelineConfig()
+    return dataclasses.replace(
+        cfg, detector=dataclasses.replace(cfg.detector, model=model),
+        storage=dataclasses.replace(cfg.storage, root=root, save_frame=True),
+        # The committed primary frame/crop is enough for this demo. Avoid retaining
+        # a second full-resolution crop for each tracked person.
+        best_shot=dataclasses.replace(cfg.best_shot, enabled=False),
+        depth=dataclasses.replace(cfg.depth, enabled=False),
+        freespace=dataclasses.replace(cfg.freespace, hz=0),
+        confirm=dataclasses.replace(cfg.confirm, deadline_s=4.0),
+        # One candidate at a time for understandable HOLD/capture behavior.
+        queue=dataclasses.replace(cfg.queue, max_pending=1),
+    )
+
+
 def perception_worker(control_queue, event_queue, preview_queue, configdict: dict) -> None:
     """Multiprocessing spawn target. All GPU imports and resources live here.
 
@@ -138,14 +156,12 @@ def perception_worker(control_queue, event_queue, preview_queue, configdict: dic
         # remain independent of GPU runtime initialization and contention.
         import cv2
 
-        from .config import PipelineConfig
         from .cosmos import LlamaCppBackend, LlamaCppConfig
         from .detector import PersonTracker, make_detector
         from .pipeline import EventPipeline
         from .preview import PreviewState, annotate
         from .sources import CameraSource, argus_pipeline
 
-        cfg = PipelineConfig()
         model = str(configdict.get("model", "~/models/yolo11n.engine"))
         if not model.endswith(".engine"):
             raise ValueError("stand worker requires the TensorRT YOLO engine")
@@ -154,15 +170,7 @@ def perception_worker(control_queue, event_queue, preview_queue, configdict: dic
         if (width, height) != (1280, 720) or fps not in (15, 30):
             raise ValueError("stand capture supports 1280x720 at 15 or 30 fps")
         root = Path(configdict.get("events_root", "~/corvidia-data/stand-events")).expanduser()
-        cfg = dataclasses.replace(
-            cfg, detector=dataclasses.replace(cfg.detector, model=model),
-            storage=dataclasses.replace(cfg.storage, root=root, save_frame=True),
-            depth=dataclasses.replace(cfg.depth, enabled=False),
-            freespace=dataclasses.replace(cfg.freespace, hz=0),
-            confirm=dataclasses.replace(cfg.confirm, deadline_s=4.0),
-            # One candidate at a time for understandable HOLD/capture behavior.
-            queue=dataclasses.replace(cfg.queue, max_pending=1),
-        )
+        cfg = _stand_pipeline_config(model, root)
         backend = LlamaCppBackend(LlamaCppConfig(url=configdict.get("cosmos_url", "http://127.0.0.1:8010")))
         if not backend.healthy() or backend.is_idle() is not True:
             raise RuntimeError("real Cosmos server must be healthy and idle")
