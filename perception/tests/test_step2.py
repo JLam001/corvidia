@@ -90,9 +90,9 @@ class FakeCapture:
 
     def read(self):
         if self.left <= 0:
-            return False, None
+            return False, None, None
         self.left -= 1
-        return True, np.zeros((8, 8, 3), np.uint8)
+        return True, np.zeros((8, 8, 3), np.uint8), time.monotonic() - 0.005
 
     def release(self) -> None:
         pass
@@ -109,6 +109,7 @@ def test_camera_loss_reconnects_with_new_epoch():
             epochs.add(f.info.source_epoch)
     src.close()
     assert {0, 1, 2} <= epochs
+    assert src.health.snapshot()["gauges"]["capture_to_arrival_ms"] >= 5.0
     assert src.health.count("camera_lost") >= 2
     assert FakeCapture.opens >= 3
 
@@ -205,8 +206,14 @@ def test_realtime_replay_drops_frames_without_faults(tmp_path):
     from corvidia_perception.run import run
 
     report = run(["--video", str(VTEST), "--mode", "realtime", "--speed", "4", "--duration", "12",
-                  "--stub-delay", "0.5", "--events", str(tmp_path), "--quiet"])
+                  "--stub-delay", "0.5", "--events", str(tmp_path), "--quiet",
+                  "--timeseries-interval", "2"])
     assert report["frames_dropped"] > 0
+    rows = [json.loads(line) for line in
+            (tmp_path / report["session_id"] / "timeseries.jsonl").read_text().splitlines()]
+    assert len(rows) >= 4
+    assert all(r["mem_available_mb"] and r["detector_ms_p50"] and r["temps_c"] for r in rows)
+    assert rows[-1]["t_s"] > rows[0]["t_s"]
     assert report["events"] > 0
     assert report["max_events_per_track"] == 1
     assert report["confirmation_ms"]["p50"] >= 500

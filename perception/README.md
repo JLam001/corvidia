@@ -8,6 +8,9 @@ Implements [`docs/event-pipeline.md`](../docs/event-pipeline.md):
   and real-time replay, live CSI camera source, MJPEG preview, run reports.
 - **Step 3, local Cosmos:** Cosmos Reason 2 2B (Q4_K_M) on llama.cpp behind the
   confirmer interface, a labeled starter crop set, and an evaluation tool.
+- **Step 4, Jetson CSI:** GStreamer capture with Argus buffer timestamps,
+  selectable sensor mode (default 1080p from the binned 1080p60 mode), power
+  mode in reports, a 10 s timeseries for drift, and a detached soak runner.
 - The live detector runs the YOLO11n TensorRT engine directly (no PyTorch or
   Ultralytics at runtime) with a NumPy ByteTrack.
 
@@ -33,6 +36,10 @@ src/corvidia_perception/
   cosmos_eval.py    # corvidia-cosmos-eval: accuracy/latency on labeled crops
   sources.py        # video replay (every/realtime) and Argus CSI camera
   preview.py        # annotated MJPEG preview + /health JSON
+deploy/
+  cosmos_server.sh  # pinned llama.cpp container for Cosmos
+  export_yolo.sh    # build the YOLO11n TensorRT engine
+  soak.sh           # detached sustained-load run (start/status/stop)
   run.py            # corvidia-run CLI and run report
 ```
 
@@ -136,6 +143,34 @@ server maps to `server_unavailable`.
 
 Memory (camera run, 20 s): TensorRT-only pipeline costs 655 MB and runs the
 detector at 22.9 ms p50; the Ultralytics/PyTorch path cost 1,051 MB at 52.7 ms.
+
+## Step 4: camera and sustained load (2026-09-27)
+
+Capture is a GStreamer pipeline read through PyGObject (the venv sees the
+system `gi`). Each frame's `capture_ts` is the Argus buffer timestamp on
+CLOCK_MONOTONIC (`capture_quality: "argus_buffer_pts"`): the time Argus
+delivered the frame, about 4.5 ms before Python receives it. It is not the
+exposure time; Argus does not expose sensor timestamps through GStreamer, and
+that would need a small C++ Argus capture.
+
+Capture cost by mode (capture only, 15 W):
+
+| Sensor mode -> output | CPU (1 core) | Argus-to-Python | Frame |
+|---|---|---|---|
+| 1080p60 mode -> 720p @ 30 | 33% | 6 ms | 2.8 MB |
+| **1080p60 mode -> 1080p @ 30 (default)** | 44% | 10 ms | 6.2 MB |
+| 4K30 mode -> 1080p @ 30 | 43% | 13 ms | 6.2 MB |
+| 4K30 mode -> 4K @ 30 | 118% | 38 ms | 24.9 MB |
+
+YOLO letterboxes every frame to 640 px, so resolution mainly sharpens the crops
+Cosmos sees. The binned 1080p mode reads out faster (less rolling-shutter skew)
+and is less noisy in low light than the 4K mode.
+
+```sh
+deploy/soak.sh start 30   # camera + YOLO + Cosmos, detached, preview on :8080
+deploy/soak.sh status     # latest timeseries row
+deploy/soak.sh stop       # graceful stop; writes run_report.json
+```
 
 ## Not yet covered
 

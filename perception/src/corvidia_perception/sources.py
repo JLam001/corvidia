@@ -13,6 +13,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
+import numpy as np
+
 from .health import Health
 from .pipeline import LatestFrameSlot
 from .records import ClockDomain, Frame, FrameInfo
@@ -131,25 +133,86 @@ class VideoFileSource:
         self._cap.release()
 
 
-def argus_pipeline(sensor_id: int = 0, capture_size: tuple[int, int] = (1920, 1080),
-                   output_size: tuple[int, int] = (1280, 720), fps: int = 30,
+# IMX477 sensor modes on this Jetson (from Argus): 0 = 3840x2160 @ 30, 1 = 1920x1080 @ 60.
+SENSOR_MODES = {0: (3840, 2160), 1: (1920, 1080)}
+
+
+def argus_pipeline(sensor_id: int = 0, sensor_mode: int = 1,
+                   output_size: tuple[int, int] = (1920, 1080), fps: int = 30,
                    flip: int = 0) -> str:
-    cw, ch = capture_size
+    """Argus capture, VIC scaling (nvvidconv), BGR frames into an appsink named `sink`."""
+    cw, ch = SENSOR_MODES[sensor_mode]
     ow, oh = output_size
     return (
-        f"nvarguscamerasrc sensor-id={sensor_id} ! "
+        f"nvarguscamerasrc sensor-id={sensor_id} sensor-mode={sensor_mode} ! "
         f"video/x-raw(memory:NVMM),width={cw},height={ch},framerate={fps}/1 ! "
         f"nvvidconv flip-method={flip} ! video/x-raw,width={ow},height={oh},format=BGRx ! "
-        "videoconvert ! video/x-raw,format=BGR ! appsink drop=1 max-buffers=1 sync=false"
+        "videoconvert ! video/x-raw,format=BGR ! "
+        "appsink name=sink max-buffers=1 drop=true sync=false"
     )
 
 
+class GstCapture:
+    """Pulls BGR frames from a GStreamer pipeline with an appsink named `sink`.
+
+    `read()` returns (ok, image, capture_mono): capture_mono is the buffer
+    timestamp on the pipeline's monotonic clock, in time.monotonic() seconds.
+    For nvarguscamerasrc that is when Argus delivered the frame (measured ~4.5 ms
+    before Python receives it), not the start of exposure.
+    """
+
+    def __init__(self, description: str, timeout_s: float = 2.0) -> None:
+        import gi
+
+        gi.require_version("Gst", "1.0")
+        from gi.repository import Gst
+
+        Gst.init(None)
+        self._Gst = Gst
+        self._timeout_ns = int(timeout_s * 1e9)
+        self._pipeline = Gst.parse_launch(description)
+        self._sink = self._pipeline.get_by_name("sink")
+        self._opened = self._pipeline.set_state(Gst.State.PLAYING) != Gst.StateChangeReturn.FAILURE
+        self._monotonic_clock = None
+
+    def isOpened(self) -> bool:
+        return self._opened
+
+    def read(self) -> tuple[bool, np.ndarray | None, float | None]:
+        Gst = self._Gst
+        sample = self._sink.emit("try-pull-sample", self._timeout_ns)
+        if sample is None:
+            return False, None, None
+        caps = sample.get_caps().get_structure(0)
+        w, h = caps.get_value("width"), caps.get_value("height")
+        buf = sample.get_buffer()
+        ok, info = buf.map(Gst.MapFlags.READ)
+        if not ok:
+            return False, None, None
+        try:
+            image = np.frombuffer(info.data, np.uint8, count=w * h * 3).reshape(h, w, 3).copy()
+        finally:
+            buf.unmap(info)
+        capture = None
+        if buf.pts != Gst.CLOCK_TIME_NONE:
+            if self._monotonic_clock is None:
+                clock = self._pipeline.get_clock()
+                self._monotonic_clock = bool(
+                    clock is not None and clock.props.clock_type == Gst.ClockType.MONOTONIC)
+            if self._monotonic_clock:
+                capture = (self._pipeline.get_base_time() + buf.pts) / 1e9
+        return True, image, capture
+
+    def release(self) -> None:
+        self._pipeline.set_state(self._Gst.State.NULL)
+
+
 class CameraSource:
-    """Live capture through an OpenCV-readable pipeline (Argus CSI by default).
+    """Live capture (Argus CSI through GStreamer by default).
 
     A failed read is camera loss: the capture is reopened after `reconnect_s` and
-    a new source epoch starts. Capture timestamps are host arrival times; Argus
-    sensor timestamps are not exposed through OpenCV.
+    a new source epoch starts. Frames carry the driver's buffer timestamp as the
+    capture time when available, else host arrival time.
     """
 
     def __init__(self, pipeline: str, *, source_id: str = "csi:0", fps: float = 30.0,
@@ -161,7 +224,7 @@ class CameraSource:
         self.reconnect_s = reconnect_s
         self.health = health or Health()
         self.epoch = 0
-        self._open = open_capture or (lambda p: _cv2().VideoCapture(p, _cv2().CAP_GSTREAMER))
+        self._open = open_capture or GstCapture
         self._frame_id = 0
         self._slot = LatestFrameSlot(self.health)
         self._stop = threading.Event()
@@ -176,10 +239,17 @@ class CameraSource:
     def _run(self) -> None:
         first = True
         while not self._stop.is_set():
-            cap = self._open(self.pipeline)
+            try:
+                cap = self._open(self.pipeline)
+            except Exception as e:  # noqa: BLE001 - pipeline construction errors are camera faults
+                self.health.incr("camera_open_failures")
+                self.health.fault("camera", f"cannot build capture: {e}")
+                self._stop.wait(self.reconnect_s)
+                continue
             if not cap.isOpened():
                 self.health.incr("camera_open_failures")
                 self.health.fault("camera", "cannot open capture")
+                cap.release()
                 self._stop.wait(self.reconnect_s)
                 continue
             if not first:
@@ -188,17 +258,22 @@ class CameraSource:
             self.connected.set()
             self.health.clear_fault("camera")
             while not self._stop.is_set():
-                ok, image = cap.read()
+                ok, image, capture = cap.read()
                 if not ok or image is None:
                     self.health.incr("camera_lost")
                     self.health.fault("camera", "read failed; reconnecting")
                     break
                 self._frame_id += 1
                 now = time.monotonic()
+                if capture is not None and capture <= now:
+                    self.health.set("capture_to_arrival_ms", round((now - capture) * 1000, 1))
+                    ts, quality = capture, "argus_buffer_pts"
+                else:
+                    ts, quality = now, "host_arrival"
                 info = FrameInfo(
                     self.source_id, self.epoch, self._frame_id, image.shape[1], image.shape[0],
-                    now, time.time(), capture_ts=now, capture_clock=ClockDomain.HOST_MONOTONIC,
-                    capture_quality="host_arrival",
+                    now, time.time(), capture_ts=ts, capture_clock=ClockDomain.HOST_MONOTONIC,
+                    capture_quality=quality,
                 )
                 self.health.incr("frames_captured")
                 self._slot.put(Frame(info, image))

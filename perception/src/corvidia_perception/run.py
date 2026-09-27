@@ -71,6 +71,7 @@ class SystemSampler:
         self.min_available_kb: int | None = None
         self.mem_total_kb: int | None = None
         self.max_temp_c: dict[str, float] = {}
+        self.current_temp_c: dict[str, float] = {}
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, args=(interval_s,), daemon=True)
         self._thread.start()
@@ -100,6 +101,7 @@ class SystemSampler:
                 temp = int((zone / "temp").read_text()) / 1000
             except (OSError, ValueError):
                 continue
+            self.current_temp_c[name] = temp
             self.max_temp_c[name] = max(temp, self.max_temp_c.get(name, -273.0))
 
     def _run(self, interval_s: float) -> None:
@@ -116,6 +118,20 @@ class SystemSampler:
         min_avail = self.min_available_kb // 1024 if self.min_available_kb is not None else None
         return {"peak_system_used_mb": peak_used, "min_available_mb": min_avail,
                 "max_temp_c": self.max_temp_c}
+
+
+def power_mode() -> str | None:
+    """Jetson nvpmodel mode name, e.g. "15W" (None when unavailable)."""
+    import subprocess
+
+    try:
+        out = subprocess.run(["nvpmodel", "-q"], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    for line in out.splitlines():
+        if line.startswith("NV Power Mode:"):
+            return line.split(":", 1)[1].strip()
+    return None
 
 
 def pct(values, qs=(50, 95, 99)) -> dict[str, float | None]:
@@ -135,7 +151,9 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--speed", type=float, default=1.0, help="realtime replay speed multiplier")
     ap.add_argument("--loop", action="store_true", help="loop the video (each loop is a new epoch)")
     ap.add_argument("--sensor-id", type=int, default=0)
-    ap.add_argument("--camera-size", default="1280x720", help="camera output size WxH")
+    ap.add_argument("--sensor-mode", type=int, choices=[0, 1], default=1,
+                    help="IMX477 mode: 0 = 3840x2160@30, 1 = 1920x1080@60 (binned)")
+    ap.add_argument("--camera-size", default="1920x1080", help="camera output size WxH")
     ap.add_argument("--camera-fps", type=int, default=30)
     ap.add_argument("--flip", type=int, default=0, help="nvvidconv flip-method (0-7)")
     ap.add_argument("--config", type=Path, help="TOML config (sections mirror PipelineConfig)")
@@ -150,6 +168,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--max-frames", type=int, default=None)
     ap.add_argument("--duration", type=float, default=None, help="stop after this many seconds")
     ap.add_argument("--quiet", action="store_true")
+    ap.add_argument("--timeseries-interval", type=float, default=10.0,
+                    help="seconds between timeseries.jsonl rows in the session directory (0: off)")
     return ap
 
 
@@ -177,7 +197,8 @@ def run(argv: list[str] | None = None) -> dict:
     # -- source -----------------------------------------------------------------------
     if args.camera:
         source = CameraSource(
-            argus_pipeline(args.sensor_id, output_size=(w, h), fps=args.camera_fps, flip=args.flip),
+            argus_pipeline(args.sensor_id, args.sensor_mode, output_size=(w, h),
+                           fps=args.camera_fps, flip=args.flip),
             source_id=f"csi:{args.sensor_id}", fps=args.camera_fps)
         if not source.connected.wait(15.0):
             source.close()
@@ -214,6 +235,7 @@ def run(argv: list[str] | None = None) -> dict:
     det_ms_idle: deque[float] = deque(maxlen=200_000)
     loop_ms: deque[float] = deque(maxlen=200_000)
     age_ms: deque[float] = deque(maxlen=200_000)
+    capture_age_ms: deque[float] = deque(maxlen=200_000)
     dropped = 0
     processed = 0
     last_id: dict[int, int] = {}
@@ -240,6 +262,9 @@ def run(argv: list[str] | None = None) -> dict:
         detector.warmup((source.height, source.width, 3))
     started = time.monotonic()
     last_print = started
+    last_series = started
+    series_path = (pipe.store.session_dir / "timeseries.jsonl"
+                   if pipe.store is not None and args.timeseries_interval > 0 else None)
     source_timed_out = False
     epoch = None
     try:
@@ -270,6 +295,8 @@ def run(argv: list[str] | None = None) -> dict:
                 dropped += frame.info.frame_id - prev - 1
             last_id[epoch] = frame.info.frame_id
             age_ms.append((t0 - frame.info.arrival_mono) * 1000)
+            if frame.info.capture_quality == "argus_buffer_pts" and frame.info.capture_ts is not None:
+                capture_age_ms.append((t0 - frame.info.capture_ts) * 1000)
 
             xyxy, conf = detector.detect(frame.image)
             dets = tracker.update(xyxy, conf, frame.info.frame_id)
@@ -295,6 +322,10 @@ def run(argv: list[str] | None = None) -> dict:
             if preview is not None:
                 preview.update(PreviewState(frame, dets, _labels(pipe, epoch), _stats(
                     source, pipe, det_ms, loop_ms, age_ms, processed, dropped)))
+            if series_path is not None and time.monotonic() - last_series >= args.timeseries_interval:
+                last_series = time.monotonic()
+                _append_series(series_path, last_series - started, pipe, sampler, det_ms, loop_ms,
+                               processed, dropped)
             if not args.quiet and time.monotonic() - last_print >= 5.0:
                 last_print = time.monotonic()
                 print(" | ".join(_stats(source, pipe, det_ms, loop_ms, age_ms, processed, dropped)))
@@ -315,12 +346,47 @@ def run(argv: list[str] | None = None) -> dict:
     report = _report(args, cfg, pipe, source, detector, processed, dropped, elapsed,
                      det_ms, loop_ms, age_ms, system)
     report["detector_ms_while_confirming"] = pct(det_ms_confirming)
+    # Driver timestamp -> detector start: includes conversion and queueing.
+    report["capture_to_detect_ms"] = pct(capture_age_ms)
+    if args.camera:
+        report["camera"] = {"sensor_id": args.sensor_id, "sensor_mode": args.sensor_mode,
+                            "output_size": args.camera_size, "fps": args.camera_fps,
+                            "flip": args.flip}
+    report["power_mode"] = power_mode()
     report["detector_ms_while_idle"] = pct(det_ms_idle)
     if pipe.store is not None:
         (pipe.store.session_dir / "run_report.json").write_text(json.dumps(report, indent=2, default=str))
     if not args.quiet:
         print(json.dumps(report, indent=2, default=str))
     return report
+
+
+def _append_series(path: Path, t: float, pipe: EventPipeline, sampler: SystemSampler,
+                   det_ms, loop_ms, processed: int, dropped: int) -> None:
+    """One row of drift data for soak tests (window = last 300 frames)."""
+    snap = pipe.health.snapshot()
+    recent_det = list(det_ms)[-300:]
+    recent_loop = list(loop_ms)[-300:]
+    row = {
+        "t_s": round(t, 1),
+        "processed": processed,
+        "dropped": dropped,
+        "loop_fps": round(1000 / float(np.mean(recent_loop)), 1) if recent_loop else None,
+        "detector_ms_p50": round(float(np.median(recent_det)), 1) if recent_det else None,
+        "detector_ms_p95": round(float(np.percentile(recent_det, 95)), 1) if recent_det else None,
+        "mem_available_mb": snap["gauges"].get("mem_available_mb"),
+        "temps_c": dict(sampler.current_temp_c),
+        "queue_depth": snap["gauges"].get("queue_depth"),
+        "worker_state": snap["gauges"].get("worker_state"),
+        "last_inference_s": snap["gauges"].get("last_inference_s"),
+        "counters": snap["counters"],
+        "faults": snap["faults"],
+    }
+    try:
+        with open(path, "a") as f:
+            f.write(json.dumps(row) + "\n")
+    except OSError:
+        pipe.health.incr("timeseries_write_errors")
 
 
 def _labels(pipe: EventPipeline, epoch: int | None) -> dict[int, str]:
