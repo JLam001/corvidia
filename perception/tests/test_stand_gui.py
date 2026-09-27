@@ -65,6 +65,23 @@ def test_prompt_is_only_mission_input_and_second_click_cannot_duplicate_submissi
     assert len(api.posts) == 1 and api.state["state"] == "searching"
 
 
+def test_timed_brief_uses_same_single_submission_path_without_timing_overrides():
+    control, api = controller()
+    brief = "find as many people as possible within 30 seconds"
+    control.submit(brief)
+    control.process_command_once()
+    assert api.posts == [("mission", {"appearance": brief})]
+
+
+@pytest.mark.parametrize("brief", ["find people for 61 seconds",
+                                   "find people wearing a blue polo and glasses for 30 seconds"])
+def test_invalid_timed_brief_cannot_queue_a_mission(brief):
+    control, api = controller()
+    with pytest.raises(ValueError):
+        control.submit(brief)
+    assert not control.process_command_once() and api.posts == []
+
+
 @pytest.mark.parametrize("value", ["", " ", "a" * 241, "red\nshirt", "red\x00shirt", 5])
 def test_invalid_description_never_queues_a_mission(value):
     control, api = controller()
@@ -214,6 +231,46 @@ def test_evidence_uses_authenticated_shared_api_and_zero_does_not_claim_physical
     assert view["evidence"] == b"jpeg-capture" and view["evidence_id"] == "saved"
     assert "zero-input telemetry verified" in view["notice"]
     assert "Observe physical" in view["notice"]
+
+
+def test_collection_fetches_new_captures_during_search_and_caches_each_version():
+    control, api = controller()
+    api.state.update(state="searching", mission_id="collection", evidence_available=True,
+                     completion_mode="timed_collection", capture_count=1)
+    control.poll_once()
+    assert control.snapshot()["evidence"] == b"jpeg-capture"
+    first_version = control.snapshot()["evidence_version"]
+    control.poll_once()
+    assert control.snapshot()["evidence_version"] == first_version
+    api.state["capture_count"] = 2
+    control.poll_once()
+    assert control.snapshot()["evidence_version"] == first_version + 1
+    assert api.images.count(("/api/evidence?mission_id=collection", True)) == 2
+    assert api.posts == []  # Captures do not cause the display to stop or restart a mission.
+
+
+def test_new_external_collection_clears_previous_missions_capture():
+    control, api = controller()
+    api.state.update(state="complete", mission_id="previous", evidence_available=True, capture_count=1)
+    control.poll_once()
+    assert control.snapshot()["evidence"] is not None
+    api.state.update(state="searching", mission_id="new", completion_mode="timed_collection",
+                     evidence_available=False, capture_count=0)
+    control.poll_once()
+    assert control.snapshot()["evidence"] is None
+    assert api.posts == []
+
+
+@pytest.mark.parametrize("state,count,expected", [
+    ("searching", 1, "Timed search · 1 capture saved"),
+    ("complete", 2, "Timed search complete · 2 captures saved"),
+    ("complete", 0, "Timed search complete · 0 captures saved"),
+    ("failed", 2, "Timed search · 2 captures saved"),
+])
+def test_collection_summary_reports_captures_without_claiming_unique_people(state, count, expected):
+    status = dict(completion_mode="timed_collection", state=state, capture_count=count)
+    assert gui.collection_text(status) == expected
+    assert gui.collection_text({**status, "completion_mode": "first_match"}) == ""
 
 
 def test_old_evidence_cannot_replace_new_submission_result():
@@ -464,5 +521,42 @@ def test_compact_geometry_reserves_error_and_footer_without_hiding_actions():
                 assert widget.winfo_rooty() + widget.winfo_height() <= parent.winfo_rooty() + parent.winfo_height()
                 parent = parent.master
         assert window.find.winfo_height() >= 24 and window.abort_button.winfo_height() >= 24
+    finally:
+        window.close()
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="Tk geometry requires an X display (use Xvfb)")
+def test_normal_collection_completion_keeps_abort_error_and_footer_visible_with_capture():
+    import io
+    from PIL import Image
+
+    tk = pytest.importorskip("tkinter")
+    root = tk.Tk()
+    root.winfo_screenwidth = lambda: 1920
+    root.winfo_screenheight = lambda: 1080
+    control, api = controller()
+    picture = io.BytesIO()
+    Image.new("RGB", (640, 480)).save(picture, format="JPEG")
+    api.get_image = lambda *_args, **_kwargs: picture.getvalue()
+    api.state.update(state="complete", mission_id="a" * 32, completion_mode="timed_collection",
+                     capture_count=12, evidence_available=True,
+                     motor={"connected": True, "stop_status": "verified", "zero_confirmed": True})
+    control.poll_once()
+    window = gui.MissionWindow(control, root=root)
+    try:
+        window.local_error = "Timed collections must last 1–60 whole seconds"
+        window.render()
+        root.update()
+        assert "12 captures saved" in window.camera_label.cget("text")
+        for widget in (window.find, window.abort_button, window.error_label,
+                       window.closing_note, window.result_box):
+            assert widget.winfo_ismapped()
+            parent = widget.master
+            while True:
+                assert widget.winfo_rooty() >= parent.winfo_rooty()
+                assert widget.winfo_rooty() + widget.winfo_height() <= parent.winfo_rooty() + parent.winfo_height()
+                if parent is root:
+                    break
+                parent = parent.master
     finally:
         window.close()

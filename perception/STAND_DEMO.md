@@ -4,7 +4,9 @@ This demo joins the Jetson camera, YOLO, Cosmos, saved evidence, and the STM32's
 bounded all-four motor interface. The operator describes a person's visible
 appearance and submits one mission. The screen gives turning and
 hold instructions; the operator turns the guarded stand using its external
-handle. A confirmed, saved image ends the mission and requests zero motor input.
+handle. An ordinary search ends after its first confirmed, saved image. A timed
+collection keeps saving matching captures until its deadline, then requests zero
+motor input.
 The Jetson owns the complete mission after Start. The Mac is an optional debug
 and command terminal; the mission continues if that connection closes.
 
@@ -40,8 +42,11 @@ appearance prompt, mission status, manual turn/HOLD guidance, saved-image result
 and explicit Abort. The Search & Rescue layout uses a **Mission brief** field
 and **Begin search** button. Enter or keypad Enter submits through the same
 validation and readiness checks as the button, without adding a newline or
-duplicating an already pending request. There are no motor-input or duration
-controls. Enter a visible description such as **person wearing a red shirt**.
+duplicating an already pending request. Enter a visible description such as
+**person wearing a red shirt**, or a timed brief such as **find as many people as
+possible within 30 seconds**. There are no motor-input controls or separate
+duration fields. The console shows the number of saved captures and the latest
+saved image.
 
 The sidebar shows camera and STM32 link freshness, IMU roll/pitch/yaw in the
 sensor frame, and requested motor input. Missing or stale telemetry is unavailable;
@@ -92,6 +97,39 @@ blue-polo recall. Blur, occlusion, lighting, and model errors remain limitations
 attribute comparison does not make the visual model infallible. The 4-second
 confirmation deadline remains in force.
 
+## Timed collection missions
+
+The mission brief selects one of two completion modes:
+
+| Brief | Behavior |
+| --- | --- |
+| `find people` | Stop after the first confirmed, saved match; search for at most 60 seconds. |
+| `find as many people as possible within 30 seconds` | Keep searching and saving confirmed matches for 30 seconds, then stop. |
+| `find people for 30 seconds` | The same 30-second collection. |
+| `find people wearing a blue polo for 30 seconds` | Collect only confirmed matches for every requested clothing trait. |
+
+Timed collections accept **1–60 whole seconds**. The clock starts when the
+supervisor starts the mission after preflight. A match does not reset or extend
+that clock. A timed collection finishes at its deadline even if it saved no
+matches; the capture count tells you what was collected. Abort or a health,
+storage, or serial fault can end either mode early.
+
+Only matching confirmations durably saved **and received by the supervisor before
+the deadline** enter the collection. An in-flight confirmation or write does not
+extend the run; a late result cannot turn into an accepted mission capture. A
+short mission may finish before the model can confirm a visible candidate.
+
+The parser retains every clothing constraint. Unsupported traits, fractional or
+out-of-range durations, and ambiguous wording are rejected. For example, use the
+explicit collection phrase above rather than `find people within 30 seconds`.
+The model cannot alter the requested duration.
+
+**Captures are not a count of unique people.** Tracking suppresses repeated
+captures of a continuously tracked person, but a person who leaves and re-enters
+can receive a new track and be saved again. Occlusion, crowding, camera motion,
+and model latency can also cause missed people. This mode records confirmed
+sightings; it does not guarantee that every visible person is found.
+
 ## Modes and fixed demo profile
 
 | Mode | Camera and Cosmos | STM32 | Start button |
@@ -110,12 +148,13 @@ simulated. Use `--mode telemetry --port /dev/serial/by-id/DEVICE` for the dedica
 read-only check. Hardware commissioning uses a separately launched `--mode hardware`
 service with that serial path.
 
-The onboard demo profile is fixed internally at **5% equal motor input** with a
-**60-second deadline**. A matching saved capture normally stops the mission
-before that limit. User interfaces and mission packets accept a person
-description and hardware readiness observations; they accept no power or timing
-overrides. The model cannot change this profile, extend a run, or authorize a
-new mission. Percentage is requested input, not measured RPM or electrical power.
+The onboard demo profile is fixed internally at **5% equal motor input** and a
+**60-second maximum**. Ordinary searches stop after their first matching saved
+capture. An explicit timed brief chooses a collection duration from 1–60 seconds.
+User interfaces and mission packets accept the brief and hardware readiness
+observations; they accept no raw power or duration overrides. The model cannot
+change motor input, extend a run, or authorize a new mission. Percentage is
+requested input, not measured RPM or electrical power.
 The installed v5 firmware remains unchanged.
 
 ## Connection and deployment
@@ -202,20 +241,22 @@ the operator link. Reopening without the token gives a view without controls.
    secured motors. Software cannot verify the guard, restraint, external handle,
    or power disconnect. Nobody
    turns or approaches the drone directly while motors are energized.
-4. In the native console, enter the person's visible appearance and review the
-   target and preflight status. The service supplies the fixed demo profile;
-   there are no power or timing fields.
+4. In the native console, enter the person's visible appearance or a timed
+   collection brief and review the target, requested duration, and preflight status.
+   The service supplies the fixed motor input; there are no power or timing fields.
 5. Confirm all five readiness observations. Start only with startup complete,
    all motors still, and the guarded area clear. Use the external handle to
    follow the displayed guidance; hold still while confirmation completes.
-6. A saved confirmation, deadline, operator stop, or fault ends the run. Use
-   **Stop** to request zero input. Fresh zero-input telemetry is separate from
+6. An ordinary search ends on its first saved confirmation; a timed collection
+   continues until its deadline. Operator stop or a fault ends either run early.
+   Use **Stop** to request zero input. Fresh zero-input telemetry is separate from
    physical stopping: observe the motors before approaching.
 
 The onboard supervisor maintains the motor watchdog while its camera, model,
 storage, and serial checks remain healthy. Closing the console, dashboard, terminal, SSH,
 or Ethernet connection does not stop a started mission. Use explicit **Stop**
-to end it early; a matching capture, fault, or the fixed deadline also ends it.
+to end it early. Faults and the mission deadline also end it; a matching capture
+ends first-match missions only.
 An ended mission does not automatically restart when a client or hardware
 reconnects. If zero-input stop verification fails, new missions are
 blocked until the operator recovers the physical setup and restarts the service.
@@ -228,17 +269,19 @@ deployment's `perception` directory:
 ```sh
 .venv/bin/python -m corvidia_perception.stand_cli status
 .venv/bin/python -m corvidia_perception.stand_cli run "person wearing a red shirt"
+.venv/bin/python -m corvidia_perception.stand_cli run "find as many people as possible within 30 seconds"
 .venv/bin/python -m corvidia_perception.stand_cli watch
 .venv/bin/python -m corvidia_perception.stand_cli stop
 ```
 
-`run` completes the applicable readiness checks, submits one appearance-only
+`run` completes the applicable readiness checks, submits one mission brief
 mission request, and returns its accepted mission ID. The receipt does not
 confirm motor motion. The onboard service performs preflight and then
 handles detection, appearance confirmation, capture, and motor supervision.
 The command returning or its SSH connection closing does not stop that mission.
-The same internal demo profile applies. A matching committed capture, fault,
-explicit stop, or the fixed deadline ends the run. An ambiguous response is
+The same fixed motor input and bounded completion modes apply. Faults, explicit
+stop, and the mission deadline end the run; a matching committed capture ends
+first-match missions only. An ambiguous response is
 reported without retrying or issuing an automatic Stop. No separate preparation
 or start command is sent, and no STM32 firmware change is needed.
 
@@ -300,15 +343,29 @@ onboard mission running. The explicit `stop` command works from another terminal
 
 ## Completion and evidence
 
-A mission succeeds only when the target's confirmation and image record are
-committed for the current mission. An old event, raw detector box, timed-out
-answer, or failed write must not report success. The saved capture is the
-camera image, accompanied by metadata; it is not a screenshot of the browser.
+An ordinary first-match mission succeeds only when the target's confirmation and
+image record are committed for the current mission before the deadline. A timed
+collection completes at its deadline and reports its accepted captures, including
+zero captures when none qualified. An old event, raw detector box, timed-out
+answer, late result, or failed write cannot count as an accepted capture. Saved
+captures are camera images accompanied by metadata.
 
 The event pipeline stores a full frame and the crop submitted to Cosmos.
 Its optional best-shot image may be written later when a track ends, so the
 motor stop must not wait for it. Evidence is retrieved by the current mission
 identifier rather than by accepting an arbitrary filesystem path.
+
+On the deployed Jetson, images and event metadata live under
+`~/corvidia-data/stand-events/`. The collection manifest is
+`~/corvidia-data/stand-missions/<mission_id>.jsonl`: each `capture_saved` row
+records an accepted capture, and the final `mission_result` contains the
+mission's `captures` list. Use that list to identify collected evidence. Event
+directories also contain rejected and otherwise unaccepted candidates for
+auditing; counting those directories does not give the mission's capture count.
+The journal writes asynchronously, so its final summary can appear shortly after
+the console reports completion. Accepted image and event files are already saved.
+The console displays the count and latest accepted image while the full
+collection remains in storage.
 
 There is no motor RPM feedback. UI messages say **zero inputs confirmed**,
 not that physical stopping was measured. IMU telemetry is in the raw sensor
@@ -326,16 +383,17 @@ requests are rejected. JSON request bodies are limited to 4096 bytes.
 | --- | --- |
 | `GET /api/status` | Current supervisor snapshot |
 | `GET /frame.jpg` | Latest preview JPEG, or 503 while waiting |
-| `POST /api/mission` | `appearance`, optional hardware `readiness`; returns `accepted` and new `mission_id` |
+| `POST /api/mission` | `appearance` containing the full mission brief, optional hardware `readiness`; returns `accepted` and new `mission_id` |
 | `POST /api/stop` | `mission_id` |
-| `GET /api/evidence?mission_id=…` | Authorized committed image; requires token header |
+| `GET /api/evidence?mission_id=…` | Latest accepted committed image; requires token header |
 
 Mission readiness contains exactly `guarded_stand`, `hands_clear`,
 `power_disconnect_accessible`, `motors_still`, and `esc_startup_finished`, each
 the JSON boolean `true` for hardware mode. Observation mode omits physical
 assertions; the supervisor enforces readiness according to its immutable mode.
 The console clears these observations after submission. Mission requests accept
-no extra fields, including power or duration overrides. The old prepare/start
+no extra fields, including raw power or duration overrides. Timed collection is
+selected only by the validated brief in `appearance`. The old prepare/start
 endpoints are retired. Commands enqueue `{"action": "mission|stop", ...}` and
 return 202; this acknowledges queue admission, not motor motion or a completed
 mission. Check the returned mission ID in subsequent status.
@@ -345,17 +403,35 @@ mission. Check the returned mission ID in subsequent status.
 The existing remote baseline passed 68 non-GPU tests before integration. That
 establishes the existing event behavior, not stand-control readiness. Validate:
 
-- Only a current, confirmed and committed event completes the current mission.
+- Only a current, confirmed and committed event received before the deadline
+  counts as a capture. First-match missions stop on that capture; timed
+  collections keep running until their deadline.
 - Storage failure, camera loss, backend failure, operator Stop, deadline,
   supervisor loss, and serial loss end the run without automatic restart.
 - Duplicate Start and repeated packets cannot extend or revive the fixed run.
 - Missing token, wrong Host/Origin, oversized input, malformed readiness, and
-  any power or timing override never reaches the supervisor command queue.
+  any raw power or duration override never reaches the supervisor command queue.
 - Run the real camera/Cosmos workflow in observation mode, then inspect fresh
   read-only USB telemetry with motor power disconnected.
 - Separately commission the guarded hardware setup. Record the requested input,
   duration, capture-to-stop latency, ACK, fresh zero telemetry, and the operator's
   physical stop observation. A test remains incomplete without that observation.
+
+## Timed collection validation — 2026-09-27
+
+- The Jetson CPU test suite passed **673 tests**, with 7 GPU/camera tests
+  deselected. Display tests ran under Xvfb.
+- A real camera/YOLO/Cosmos rehearsal of `find as many people as possible
+  within 30 seconds` saved **5 confirmed sightings**. All five full-frame JPEGs,
+  five crop JPEGs, and event records were present; the final journal listed all
+  five accepted captures. This is a sighting count, not five unique people.
+- The supervisor requested stop after **30.002 seconds**, then confirmed zero
+  simulated inputs. Mission ID: `27622b43a6624815ae2ba3ca120b7c57`.
+- Motor and IMU state were simulated in that isolated camera rehearsal. The
+  normal service correctly blocked its initial attempt because the connected
+  STM32 reported stale IMU readings (`IMU_OK=0`). The normal service was restored
+  in observation mode with its live, read-only telemetry check intact. No
+  powered motor test or firmware change was made for this feature.
 
 ## Integration validation — 2026-09-27 (earlier architecture)
 
@@ -435,7 +511,8 @@ The stand already links mission decisions to the installed v5 interface through
 [`MotorSession`](src/corvidia_perception/stand_motor.py). An explicit operator
 start establishes one bounded run; the adapter obtains the firmware token,
 sets that run's envelope, and sends the existing all-four MAVLink bench command.
-A committed matching capture, stop request, fault, or deadline ends that run.
+A stop request, fault, or deadline ends that run. A committed matching capture
+also ends a first-match run; timed collections continue to the fixed deadline.
 The MCU's own watchdogs remain responsible for enforcing output limits.
 
 The console, maintenance clients, and a future external mission adapter must use this

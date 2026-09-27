@@ -19,7 +19,8 @@ import threading
 import time
 import uuid
 
-from .appearance import AppearanceRequirements, compile_appearance
+from .appearance import AppearanceRequirements
+from .mission_prompt import parse_mission_prompt
 
 
 ACTIVE = {"starting", "searching", "confirming", "saving"}
@@ -37,17 +38,24 @@ class MissionSpec:
     requirements: AppearanceRequirements
     percent: float = 5.0
     duration_ms: int = MISSION_DURATION_MS
+    completion_mode: str = "first_match"
+    prompt: str = ""
 
     @classmethod
-    def create(cls, appearance, percent=MISSION_PERCENT, duration_ms=MISSION_DURATION_MS):
-        requirements = compile_appearance(appearance)
+    def create(cls, appearance, percent=MISSION_PERCENT, duration_ms=None):
+        parsed = parse_mission_prompt(appearance)
+        if duration_ms is None:
+            duration_ms = parsed.duration_ms
+        elif parsed.completion_mode == "timed_collection" and duration_ms != parsed.duration_ms:
+            raise ValueError("Duration conflicts with the mission brief")
         if isinstance(percent, bool) or not isinstance(percent, (int, float)) or not math.isfinite(percent):
             raise ValueError("Motor input must be a finite number")
         if not 0 < percent <= 20:
             raise ValueError("Stand input must be greater than zero and at most 20%")
         if type(duration_ms) is not int or not 1000 <= duration_ms <= 60_000:
             raise ValueError("Duration must be 1,000–60,000 integer milliseconds")
-        return cls(uuid.uuid4().hex, appearance.strip(), requirements, float(percent), duration_ms)
+        return cls(uuid.uuid4().hex, parsed.appearance, parsed.requirements, float(percent),
+                   duration_ms, parsed.completion_mode, parsed.prompt)
 
     @property
     def description_sha256(self):
@@ -135,6 +143,9 @@ class StandSupervisor:
         self.pending_terminal = None
         self.result_path = None
         self.evidence = None
+        self.captures = []
+        self.capture_events = set()
+        self.capture_tracks = set()
         self.result = None
         self.finished_missions = {}
         self.recovery_required = False
@@ -161,7 +172,7 @@ class StandSupervisor:
         if action != "mission":
             raise ValueError("Unknown action; submit a mission or stop it")
         if set(message) - {"action", "appearance", "readiness"}:
-            raise ValueError("Mission input cannot set motor power or timing")
+            raise ValueError("Mission input cannot set motor power or raw timing fields; use the mission brief")
         spec = MissionSpec.create(message.get("appearance"))
         readiness = message.get("readiness", {})
         if not isinstance(readiness, dict) or (readiness and
@@ -228,11 +239,14 @@ class StandSupervisor:
             self.motor.start_background()
         self.spec = message.get("spec") or MissionSpec.create(
             message.get("appearance"), message.get("percent", MISSION_PERCENT),
-            message.get("duration_ms", MISSION_DURATION_MS))
+            message.get("duration_ms"))
         self.state, self.error, self.guidance = "prepared", None, "hold"
         self.started_mono = self.deadline = self.stopping_mono = None
         self.stage = self.stage_started = self.pending_terminal = None
         self.evidence = self.result_path = self.result = None
+        self.captures = []
+        self.capture_events = set()
+        self.capture_tracks = set()
         self.stop_requested.clear()
         self._audit("prepared", settings=asdict(self.spec), description_sha256=self.spec.description_sha256)
 
@@ -315,8 +329,6 @@ class StandSupervisor:
             fault = "live STM32 telemetry unhealthy"
         if fault:
             return fault, "failed"
-        if now >= self.deadline:
-            return "mission time limit", "timed_out"
         if not self._fresh(now):
             return "camera or detector progress stale", "failed"
         if motor.get("error") or motor.get("fault") or motor.get("start_status") == "failed":
@@ -325,7 +337,16 @@ class StandSupervisor:
             return self.stage + " deadline exceeded", "failed"
         if self.state == "starting" and now - self.started_mono > 3:
             return "motor start acknowledgement timed out", "failed"
+        if now >= self.deadline:
+            return self._deadline_outcome()
         return None
+
+    def _deadline_outcome(self):
+        if self.state == "starting":
+            return "mission expired before motor start acknowledgement", "failed"
+        if self.spec.completion_mode == "timed_collection":
+            return "collection time elapsed", "complete"
+        return "mission time limit", "timed_out"
 
     def event(self, event):
         now = self.clock()
@@ -361,7 +382,7 @@ class StandSupervisor:
         if not self.spec or event.get("mission_id") != self.spec.mission_id or self.state not in ACTIVE:
             return
         if now >= self.deadline:
-            self._stop("mission time limit", "timed_out")
+            self._stop(*(self._active_failure(now, self.motor.snapshot()) or self._deadline_outcome()))
             return
         if kind == "stage":
             stage = event.get("stage")
@@ -380,17 +401,41 @@ class StandSupervisor:
                 self._stop("capture could not be committed", "failed")
             elif event.get("result") == "confirmed":
                 captured = event.get("capture_mono")
-                if (event.get("source_epoch") != self.source_epoch or captured is None
+                if (event.get("source_epoch") != self.source_epoch
+                        or isinstance(captured, bool) or not isinstance(captured, (int, float))
+                        or not math.isfinite(captured)
                         or not self.started_mono <= captured <= now):
                     self._stop("capture does not belong to active mission frames", "failed")
                     return
-                self.result_path, self.evidence = event.get("path"), dict(event)
+                if self.spec.completion_mode == "timed_collection":
+                    committed = event.get("commit_mono")
+                    track_id, event_id = event.get("track_id"), event.get("event_id")
+                    if (isinstance(committed, bool) or not isinstance(committed, (int, float))
+                            or not math.isfinite(committed)
+                            or not captured <= committed <= now or committed >= self.deadline
+                            or type(track_id) is not int or track_id < 0
+                            or not isinstance(event_id, str) or not event_id or not event.get("path")):
+                        self._stop("invalid collection capture provenance", "failed")
+                        return
+                    key = (self.source_epoch, track_id)
+                    if event_id not in self.capture_events and key not in self.capture_tracks:
+                        self.result_path, self.evidence = event["path"], dict(event)
+                        self.captures.append(self.evidence)
+                        self.capture_events.add(event_id)
+                        self.capture_tracks.add(key)
+                        self._audit("capture_saved", capture=dict(self.evidence),
+                                    capture_count=len(self.captures))
+                else:
+                    self.result_path, self.evidence = event.get("path"), dict(event)
+                    self.captures = [self.evidence]
                 if self.stop_requested.is_set():
                     self._stop("operator stop", "cancelled")
                 elif failure:
                     self._stop(*failure)
-                else:
+                elif self.spec.completion_mode == "first_match":
                     self._stop("matching person captured", "complete")
+                else:
+                    self.state, self.guidance = "searching", "search_right"
             elif event.get("result") == "rejected" or (
                     event.get("result") == "unknown" and event.get("reason") in {
                         "ambiguous", "subject_unknown", "upper_color_unknown", "upper_garment_unknown"}):
@@ -466,8 +511,11 @@ class StandSupervisor:
                 self._audit("stop_unverified", motor=motor, evidence=self.evidence)
             if self.state in TERMINAL:
                 self.result = {"state": self.state, "error": self.error, "evidence": self.evidence,
+                               "completion_mode": self.spec.completion_mode,
+                               "capture_count": len(self.captures), "captures": list(self.captures),
                                "motor": motor, "finished_mono": now}
                 self.finished_missions[self.spec.mission_id] = self.result
+                self._audit("mission_result", result=self.result)
         self._publish()
 
     def _publish(self):
@@ -504,14 +552,17 @@ class StandSupervisor:
                                  "error": self.perception_error,
                                  "frame_age_ms": round((now - self.last_capture) * 1000, 1)
                                  if self.last_capture is not None else None},
-                  "evidence_available": bool(self.evidence and self.state in TERMINAL), "result": self.result}
+                  "capture_count": len(self.captures), "captures": list(self.captures),
+                  "evidence_available": bool(self.evidence), "result": self.result}
         with self.lock:
             self._snapshot = status
             if self._pending_mission and self.spec and self.spec.mission_id == self._pending_mission:
                 self._pending_mission = None
 
     def evidence_image(self, mission_id):
-        result = self.finished_missions.get(mission_id)
+        current = self.snapshot()
+        result = ({"evidence": current["captures"][-1]} if current.get("mission_id") == mission_id
+                  and current.get("captures") else self.finished_missions.get(mission_id))
         if not result or not result.get("evidence"):
             return None
         folder = Path(result["evidence"]["path"]).resolve()

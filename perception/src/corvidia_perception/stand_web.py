@@ -12,7 +12,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
-from .appearance import compile_appearance
+from .mission_prompt import parse_mission_prompt
 
 
 _MAX_BODY = 4096
@@ -24,14 +24,14 @@ def _command(action: str, body: dict) -> dict:
     """Validate HTTP input before it enters the supervisor's bounded queue."""
     if action == "mission":
         if set(body) - {"appearance", "readiness"}:
-            raise ValueError("Mission input cannot set motor power or timing")
+            raise ValueError("Describe the search and duration in the mission brief; motor settings are fixed")
         appearance = body.get("appearance", "")
-        compile_appearance(appearance)
+        parsed = parse_mission_prompt(appearance)
         readiness = body.get("readiness", {})
         if not isinstance(readiness, dict) or (readiness and
                 (set(readiness) != set(_READINESS) or any(v is not True for v in readiness.values()))):
             raise ValueError("Confirm all five readiness observations")
-        return dict(action=action, appearance=appearance.strip(), readiness=dict(readiness))
+        return dict(action=action, appearance=parsed.prompt, readiness=dict(readiness))
     if action != "stop":
         raise ValueError("Unknown command")
     if set(body) - {"mission_id"}:

@@ -279,7 +279,8 @@ class ConfirmationWorker:
     def _identity(c: Candidate) -> dict:
         info = c.frame_info
         return {"session_id": c.key.session_id, "event_id": c.event_id,
-                "source_epoch": c.key.source_epoch, "frame_id": info.frame_id,
+                "source_epoch": c.key.source_epoch, "track_id": c.key.track_id,
+                "frame_id": info.frame_id,
                 "capture_mono": info.capture_ts
                 if info.capture_clock.value == "host_monotonic" else info.arrival_mono}
 

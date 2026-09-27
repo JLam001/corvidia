@@ -19,7 +19,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from .appearance import compile_appearance
+from .mission_prompt import parse_mission_prompt
 
 
 DEFAULT_SESSION = Path("~/.local/state/corvidia/stand-8080.json").expanduser()
@@ -165,10 +165,10 @@ class ApiClient:
 
 def settings(appearance):
     try:
-        compile_appearance(appearance)
+        parsed = parse_mission_prompt(appearance)
     except ValueError as exc:
         raise ClientError(str(exc)) from None
-    return dict(appearance=appearance.strip())
+    return dict(appearance=parsed.prompt)
 
 
 class TerminalMission:
@@ -208,10 +208,15 @@ class TerminalMission:
     def _display(self, status):
         remaining = status.get("remaining_ms")
         seconds = math.ceil(max(0, remaining) / 1000) if type(remaining) in (int, float) else None
-        marker = (status.get("state"), status.get("guidance"), seconds)
+        count = status.get("capture_count", 0)
+        count = count if type(count) is int and count >= 0 else 0
+        collecting = status.get("completion_mode") == "timed_collection"
+        marker = (status.get("state"), status.get("guidance"), seconds, count)
         if marker != self.last_display:
             guide = GUIDANCE.get(status.get("guidance"), "Hold the stand still")
             suffix = f" · {max(0, remaining) / 1000:.1f}s remaining" if type(remaining) in (int, float) else ""
+            if collecting:
+                suffix += f" · {count} capture{'s' if count != 1 else ''} saved"
             self.say(f"{status.get('state', 'unknown')}: {guide}{suffix}")
             self.last_display = marker
 
@@ -263,9 +268,14 @@ class TerminalMission:
         if status.get("state") == "complete":
             if status.get("motor", {}).get("fault") or status.get("motor", {}).get("error"):
                 raise ClientError("Motor interface reported a fault; this mission cannot be reported successful")
-            self.say("Mission complete.")
+            if status.get("completion_mode") == "timed_collection":
+                count = status.get("capture_count", 0)
+                self.say(f"Timed search complete: {count} capture{'s' if count != 1 else ''} saved.")
+            else:
+                self.say("Mission complete.")
             return 0
-        self.say(f"Mission {status.get('state')}: {status.get('error') or 'no successful capture'}")
+        fallback = "timed search ended early" if status.get("completion_mode") == "timed_collection" else "no successful capture"
+        self.say(f"Mission {status.get('state')}: {status.get('error') or fallback}")
         return 1
 
     def run(self, appearance, *, hardware=False):
@@ -396,7 +406,7 @@ def main(argv=None):
     status_parser.add_argument("--json", action="store_true", help="Print full diagnostic status")
     sub.add_parser("stop", help="Stop the current mission and verify zero-input status")
     sub.add_parser("watch", help="Read-only guidance; exit without stopping the mission")
-    run = sub.add_parser("run", help="Submit one person-search mission to the Jetson")
+    run = sub.add_parser("run", help="Submit a first-match or timed person-search mission to the Jetson")
     run.add_argument("appearance")
     run.add_argument("--hardware", action="store_true", help="Require a hardware service and interactive readiness")
     args = parser.parse_args(argv)

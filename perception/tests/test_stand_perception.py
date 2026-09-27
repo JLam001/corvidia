@@ -107,7 +107,54 @@ def test_marked_crop_saved_and_sent_identically_without_altering_frame(harness):
     assert json.loads((directory / "event.json").read_text())["status"] == "complete"
     assert completion["path"] == str(directory.resolve())
     assert completion["capture_mono"] == pytest.approx(100.2)
+    assert completion["track_id"] == event["track_id"] == 1
     assert len(h.pipe.completions) == 1  # observer did not consume preview history
+
+
+def test_stand_collects_other_tracks_without_recapturing_visible_matches(tmp_path, harness):
+    """One active and one pending request still progress through a small crowd."""
+    cfg = _stand_pipeline_config("~/models/yolo11n.engine", tmp_path / "stand-events")
+    notices = queue.Queue(maxsize=64)
+    backend = StubBackend(lambda _: None)
+    h = harness(cfg=cfg, appearance="person", backend=backend, observer_queue=notices)
+    people = [person(track, x=20 + 75 * (track - 1)) for track in range(1, 5)]
+    h.frames(3, *people)
+    assert len(backend.requests) == 1
+    reply = json.dumps({"subject": "human", "upper_color": "unknown", "upper_garment": "unknown"})
+    for _ in people:
+        # Keep every track alive and force meaningful queue pressure while one
+        # VLM request is in flight. No request is submitted twice for a match.
+        h.frames(8, *people)
+        assert len(h.pipe.queue) <= 1
+        active = h.pipe.worker._inflight.candidate.event_id
+        backend.complete(active, reply)
+        h.pipe.tick()
+        h.frames(3, *people)
+    h.frames(30, *people)
+    captures = [item for item in drain(notices) if item["type"] == "completion"]
+    assert len(backend.requests) == len(captures) == 4
+    assert {item["track_id"] for item in captures} == {1, 2, 3, 4}
+    assert all(item["result"] == "confirmed" and item["committed"] for item in captures)
+    assert {item["session_id"] for item in captures} == {"s1"}
+    assert {item["source_epoch"] for item in captures} == {0}
+    for item in captures:
+        folder = h.session_dir / item["event_id"]
+        event = json.loads((folder / "event.json").read_text())
+        assert event["track_id"] == item["track_id"]
+        assert (folder / "frame.jpg").is_file() and (folder / "crop.jpg").is_file()
+
+
+def test_reentry_after_track_loss_is_another_sighting_not_a_unique_person(harness):
+    notices = queue.Queue(maxsize=32)
+    h = harness(appearance="person", backend=observed_backend(), observer_queue=notices)
+    h.frames(10, person(1))
+    h.idle(2.0)
+    # Tracking is not person re-identification: a new ID may belong to the same
+    # person returning to the camera. Consumers must label these as sightings.
+    h.frames(10, person(2))
+    captures = [item for item in drain(notices) if item["type"] == "completion"]
+    assert [item["track_id"] for item in captures] == [1, 2]
+    assert all(item["result"] == "confirmed" for item in captures)
 
 
 @pytest.mark.parametrize("observed,result", [

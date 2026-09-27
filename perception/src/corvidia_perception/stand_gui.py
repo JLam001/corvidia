@@ -12,7 +12,7 @@ import threading
 import time
 from urllib.parse import urlencode
 
-from .appearance import compile_appearance
+from .mission_prompt import parse_mission_prompt
 from .stand_cli import ApiClient, ClientError, DEFAULT_SESSION, load_session
 
 
@@ -31,8 +31,19 @@ GUIDANCE = {"hold": "Hold the stand still", "search_right": "Turn the stand slow
 
 
 def description(value):
-    compile_appearance(value)
-    return value.strip()
+    return parse_mission_prompt(value).prompt
+
+
+def collection_text(status):
+    """Report saved observations, without claiming unique person identities."""
+    if status.get("completion_mode") != "timed_collection":
+        return ""
+    count = status.get("capture_count", 0)
+    count = count if type(count) is int and count >= 0 else 0
+    saved = f"{count} capture{'s' if count != 1 else ''} saved"
+    if status.get("state") == "complete":
+        return "Timed search complete · " + saved
+    return "Timed search · " + saved
 
 
 def telemetry_text(status, *, connected=True):
@@ -110,6 +121,7 @@ class ConsoleController:
         self.frame_version = 0
         self.evidence = None
         self.evidence_id = None
+        self.evidence_key = None
         self.evidence_version = 0
         self.threads = []
         if start:
@@ -176,6 +188,7 @@ class ConsoleController:
             self.pending = True
             self.pending_id = None
             self.evidence = self.evidence_id = None
+            self.evidence_key = None
             self.evidence_version += 1
             self.notice = "Submitting this description once…"
             try:
@@ -251,6 +264,9 @@ class ConsoleController:
                 self.network_error = None
             mission_id = status.get("mission_id")
             self._reconcile()
+            if self.evidence_id is not None and self.evidence_id != mission_id:
+                self.evidence = self.evidence_id = self.evidence_key = None
+                self.evidence_version += 1
             if status.get("mode") != self.expected_mode:
                 self.notice = f"Console expects {self.expected_mode}; service is {status.get('mode', 'unknown')}. Mission submission is disabled."
             elif status.get("control_authority") != "onboard":
@@ -268,8 +284,9 @@ class ConsoleController:
                     self.notice = "Mission ended before a motor start was reported."
             if self.uncertain:
                 self.notice = "Submission outcome unknown. It will not be retried. The current mission status is shown; explicitly Abort if needed."
+            evidence_key = (mission_id, status.get("capture_count", 0))
             get_evidence = (bool(status.get("evidence_available")) and bool(mission_id)
-                            and mission_id != self.evidence_id and not self.pending)
+                            and evidence_key != self.evidence_key and not self.pending)
         # Image fetching never changes mission authority and may be retried.
         try:
             frame = self.api.get_image("/frame.jpg")
@@ -284,6 +301,7 @@ class ConsoleController:
                 with self.lock:
                     if not self.pending and self.status.get("mission_id") == mission_id:
                         self.evidence, self.evidence_id = image, mission_id
+                        self.evidence_key = evidence_key
                         self.evidence_version += 1
             except Exception as exc:
                 with self.lock:
@@ -378,6 +396,9 @@ class MissionWindow:
         ttk.Label(brand, text="Search & Rescue", style="Subtitle.TLabel").pack(anchor="w", pady=(3, 0))
         self.badge = ttk.Label(header, text="Connecting", style="Badge.TLabel")
         self.badge.pack(side="right")
+        self.closing_note = ttk.Label(outer, text="Closing this window does not stop the mission. The Jetson owns execution.",
+                                      style="Muted.TLabel", wraplength=self.usable_width - 60)
+        self.closing_note.pack(side="bottom", fill="x", pady=(12, 0))
         content = ttk.Frame(outer)
         content.pack(fill="both", expand=True)
         content.columnconfigure(1, weight=1)
@@ -407,8 +428,6 @@ class MissionWindow:
         self.error_label = ttk.Label(left, text="", foreground="#ffb3b9", wraplength=280)
         self.error_label.grid(row=10, column=0, sticky="w", pady=(12, 0))
         left.rowconfigure(11, weight=1)
-        ttk.Label(left, text="Closing this window does not stop the mission. The Jetson owns execution.",
-                  style="Muted.TLabel", wraplength=280).grid(row=12, column=0, sticky="sw", pady=(20, 0))
         right = ttk.Frame(content, style="Panel.TFrame", padding=18)
         right.grid(row=0, column=1, sticky="nsew")
         right.columnconfigure(0, weight=1)
@@ -617,6 +636,9 @@ class MissionWindow:
         state = status.get("state", "connecting")
         mission = view["mission_id"]
         full_status = f"State: {state.replace('_', ' ')}\nMission: {mission or 'none'}"
+        progress = collection_text(status)
+        if progress and self.compact:
+            full_status += "\n" + progress
         self.status_label.configure(text=f"State: {state.replace('_', ' ')}" if self.compact else full_status)
         if self.compact:
             self.details_status.configure(text=full_status)
@@ -634,7 +656,8 @@ class MissionWindow:
         age = status.get("perception", {}).get("frame_age_ms")
         remaining = status.get("remaining_ms")
         time_label = f" · {max(0, remaining) / 1000:.0f}s remaining" if isinstance(remaining, (int, float)) and state in ACTIVE else ""
-        self.camera_label.configure(text=(f"Latest frame age: {age} ms" if age is not None else "Waiting for camera timing") + time_label)
+        camera_text = f"Latest frame age: {age} ms" if age is not None else "Waiting for camera timing"
+        self.camera_label.configure(text=camera_text + time_label + ("\n" + progress if progress else ""))
         if view["frame"] is not None and view["frame_version"] != self.last_frame:
             self.last_frame = view["frame_version"]
             try:
@@ -651,7 +674,8 @@ class MissionWindow:
                 try:
                     self.result_photo = self._photo(view["evidence"], (420, 190))
                     self.result_image.configure(image=self.result_photo)
-                    self.result_label.configure(text=f"Saved capture · {view['evidence_id']}")
+                    label = "Latest capture" if status.get("completion_mode") == "timed_collection" else "Saved capture"
+                    self.result_label.configure(text=f"{label} · {view['evidence_id']}")
                     self.result_box.pack(fill="x") if self.compact else self.result_box.grid()
                 except Exception:
                     self.result_label.configure(text="Capture saved; image could not be displayed")

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Corvidia · Stand mission</title>
+<title>Corvidia · Search & Rescue</title>
 <style>
 :root{color-scheme:dark;font:15px/1.5 system-ui,sans-serif;background:#0a1019;color:#e9eef5}
 *{box-sizing:border-box}body{margin:0}main{max-width:1280px;margin:auto;padding:28px}
@@ -24,7 +24,7 @@ button.secondary{background:#2b4056;color:#e9eef5}button:disabled{opacity:.4;cur
 .checks label{display:flex;align-items:flex-start;gap:9px;font-size:13px;font-weight:450;margin:8px 0}.checks input{margin-top:4px;accent-color:#80dfcd}
 .video{width:100%;aspect-ratio:16/9;object-fit:contain;background:#05090f;border-radius:8px;display:block}
 .guidance{font-size:27px;font-weight:750;letter-spacing:-.4px;min-height:42px;color:#a1ecdf}
-.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:18px}.metric{border-top:1px solid #334054;padding-top:10px}.value{font-size:22px;font-weight:650}
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:18px}.metric{border-top:1px solid #334054;padding-top:10px}.value{font-size:22px;font-weight:650}
 .notice{padding:12px;border-radius:7px;background:#182b40;color:#c5ddf5}.error{color:#ffb8bd;min-height:23px;white-space:pre-wrap}
 pre{font:12px/1.5 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere;max-height:360px;overflow:auto}
 summary{cursor:pointer;color:#b3c8dd}.capture[hidden]{display:none}.capture img{width:100%;border-radius:8px}.link-state{font-size:12px;color:#9bb1c5}
@@ -33,16 +33,14 @@ summary{cursor:pointer;color:#b3c8dd}.capture[hidden]{display:none}.capture img{
 </head>
 <body>
 <main>
-<header><div><div class="eyebrow">CORVIDIA / OPERATOR CONSOLE</div><h1>Stand mission</h1></div><div><span id="mode" class="badge">Connecting</span><p id="connection" class="link-state" role="status">Waiting for the supervisor</p></div></header>
+<header><div><div class="eyebrow">CORVIDIA / OPERATOR CONSOLE</div><h1>Search & Rescue</h1></div><div><span id="mode" class="badge">Connecting</span><p id="connection" class="link-state" role="status">Waiting for the supervisor</p></div></header>
 <div class="layout">
 <section class="panel">
-<h2>Find a person</h2>
-<p class="muted">Use “person” or a top's color and garment type, such as “blue polo”. Other traits are not supported yet. Turn the guarded stand using its external handle.</p>
-<label for="appearance">Who should the camera find?</label>
-<textarea id="appearance" maxlength="240" required placeholder="A person wearing a red shirt"></textarea>
-<p class="small">Describe the person to match. This demo supports people.</p>
-<p class="small">Submitting the mission starts the configured stand run. A confirmed, saved capture stops it; an internal deadline and fault checks also end the mission.</p>
-<p id="interpreted" class="notice">Enter a person description to begin.</p>
+<h2>Mission brief</h2>
+<label for="appearance">Describe your search</label>
+<textarea id="appearance" maxlength="240" required placeholder="Find as many people as possible within 30 seconds"></textarea>
+<p class="small">Search for people or an upper garment and color. A timed search saves confirmed captures until its deadline; other searches end on the first match.</p>
+<p id="interpreted" class="notice">Enter a mission brief to begin.</p>
 <fieldset id="readiness" class="checks"><legend>Before each hardware start</legend>
 <label><input id="guarded_stand" type="checkbox">The drone is secured in the guarded stand; turning uses the external handle.</label>
 <label><input id="hands_clear" type="checkbox">Hands, people, and loose cables are clear of the motors and propellers.</label>
@@ -50,7 +48,7 @@ summary{cursor:pointer;color:#b3c8dd}.capture[hidden]{display:none}.capture img{
 <label><input id="esc_startup_finished" type="checkbox">The ESC startup tones have finished.</label>
 <label><input id="motors_still" type="checkbox">All four motors are still before starting.</label>
 </fieldset>
-<div class="buttons"><button id="start" disabled>Find person</button><button id="stop" class="stop" disabled>Abort mission · Esc</button></div>
+<div class="buttons"><button id="start" disabled>Begin search</button><button id="stop" class="stop" disabled>Abort mission · Esc</button></div>
 <p class="small">The Jetson owns the mission after submission. Closing this page or disconnecting the Mac does not stop it. Use Abort mission to end it early, and observe the motors before approaching.</p>
 <p id="error" class="error" role="alert"></p>
 </section>
@@ -58,9 +56,9 @@ summary{cursor:pointer;color:#b3c8dd}.capture[hidden]{display:none}.capture img{
 <section class="panel"><h2>Camera and guidance</h2><img id="preview" class="video" alt="Live camera preview">
 <p id="camera-status" class="small">Waiting for fresh camera frames</p>
 <p id="guidance" class="guidance" aria-live="polite">Waiting for a mission</p>
-<div class="metrics"><div class="metric"><div class="small">Mission state</div><div id="state" class="value">—</div></div><div class="metric"><div class="small">Time remaining</div><div id="remaining" class="value">—</div></div><div class="metric"><div class="small">Requested input</div><div id="motor-input" class="value">—</div></div></div>
+<div class="metrics"><div class="metric"><div class="small">Mission state</div><div id="state" class="value">—</div></div><div class="metric"><div class="small">Time remaining</div><div id="remaining" class="value">—</div></div><div class="metric"><div class="small">Captures saved</div><div id="capture-count" class="value">0</div></div><div class="metric"><div class="small">Requested input</div><div id="motor-input" class="value">—</div></div></div>
 <p id="zero-status" class="small">Physical motor stopping is not measured.</p></section>
-<section id="capture" class="panel capture" hidden><h2>Saved capture</h2><img id="evidence" alt="Saved mission evidence"><p id="capture-label" class="small"></p></section>
+<section id="capture" class="panel capture" hidden><h2>Latest saved capture</h2><img id="evidence" alt="Latest saved mission evidence"><p id="capture-label" class="small"></p></section>
 <section class="panel"><p id="telemetry-source" class="small">Waiting for telemetry source</p><details><summary>Preflight, IMU, and pipeline status</summary><p class="small">Real IMU readings are in the sensor frame. They do not establish flight readiness.</p><pre id="details">Waiting for status</pre></details></section>
 </div>
 </div>
@@ -73,7 +71,7 @@ const storageKey = 'corvidia-stand-token:' + location.host;
 let token = params.get('token') || '';
 try {if(token) sessionStorage.setItem(storageKey,token); else token=sessionStorage.getItem(storageKey)||'';} catch (_) {}
 if(params.has('token')) history.replaceState(null,'',location.pathname);
-let status = {}, pending = false, previewUrl = null, evidenceUrl = null, capturedMission = null;
+let status = {}, pending = false, previewUrl = null, evidenceUrl = null, capturedKey = null;
 const readinessNames = ['guarded_stand','hands_clear','power_disconnect_accessible','motors_still','esc_startup_finished'];
 const activeStates = new Set(['preparing','starting','running','searching','confirming','saving','stopping']);
 const terminalStates = new Set(['idle','complete','completed','stopped','failed','fault','aborted','expired','cancelled','timeout','timed_out']);
@@ -93,13 +91,17 @@ function render() {
   $('state').textContent=state.replaceAll('_',' ');
   const remaining=status.remaining_ms;
   $('remaining').textContent=Number.isFinite(remaining)?Math.max(0,remaining/1000).toFixed(1)+' s':'—';
+  const count=Number.isInteger(status.capture_count)&&status.capture_count>=0?status.capture_count:0;
+  $('capture-count').textContent=String(count);
   const frameAge=status.perception?.frame_age_ms;
   $('camera-status').textContent=Number.isFinite(frameAge)?'Latest camera frame: '+Math.round(frameAge)+' ms old':'Waiting for fresh camera frames';
   $('motor-input').textContent=Number.isFinite(status.percent)?status.percent+'%':'—';
   const guidance=status.guidance;
   const guide=typeof guidance==='string'?guidance:(guidance?.text||guidance?.action||'Waiting for a mission');
   $('guidance').textContent=guidanceLabels[guide]||guide;
-  $('interpreted').textContent=status.mission_id?'Target: '+(status.appearance||'Awaiting description')+' · '+status.percent+'% motor input · maximum '+((status.duration_ms||0)/1000)+' seconds':'Enter a person description to begin.';
+  const collection=status.completion_mode==='timed_collection';
+  const summary=collection?(state==='complete'?'Timed search complete':'Timed search')+' · '+count+' capture'+(count===1?'':'s')+' saved':'First confirmed match';
+  $('interpreted').textContent=status.mission_id?'Target: '+(status.appearance||'Awaiting description')+' · '+summary:'Enter a mission brief to begin.';
   $('readiness').hidden=status.mode!=='hardware';
   const ready=status.mode!=='hardware'||readinessNames.every(name=>$(name).checked);
   $('start').disabled=pending||!token||status.recovery_required||status.mode==='telemetry'||activeStates.has(state)||!ready;
@@ -118,25 +120,28 @@ async function refresh() {
     const response=await fetch('/api/status',{cache:'no-store',signal:AbortSignal.timeout(1500)});
     if(!response.ok) throw new Error('Supervisor unavailable');
     status=await response.json(); render(); $('connection').textContent='Supervisor connected';
-    if(status.evidence_available && status.mission_id!==capturedMission) await showEvidence(status.mission_id);
+    const key=JSON.stringify([status.mission_id,status.capture_count||0]);
+    if(status.evidence_available && key!==capturedKey) await showEvidence(status.mission_id,key);
   } catch(e) {$('connection').textContent='Debug connection lost — mission continues on the Jetson'; $('start').disabled=true; error(e.message);}
 }
-async function showEvidence(mission) {
+async function showEvidence(mission,key) {
   const response=await fetch('/api/evidence?mission_id='+encodeURIComponent(mission),{headers:{'X-Corvidia-Token':token},signal:AbortSignal.timeout(1500)});
   if(!response.ok) return;
-  const next=URL.createObjectURL(await response.blob()); if(evidenceUrl) URL.revokeObjectURL(evidenceUrl);
-  evidenceUrl=next; $('evidence').src=next; $('capture').hidden=false; $('capture-label').textContent='Mission '+mission; capturedMission=mission;
+  const blob=await response.blob();
+  if(status.mission_id!==mission) return;
+  const next=URL.createObjectURL(blob); if(evidenceUrl) URL.revokeObjectURL(evidenceUrl);
+  evidenceUrl=next; $('evidence').src=next; $('capture').hidden=false; $('capture-label').textContent='Mission '+mission; capturedKey=key;
 }
 async function start() {
   if($('start').disabled) return;
   pending=true; error(''); render();
   try {
-    if(!$('appearance').value.trim()) throw new Error('Describe the person to find.');
+    if(!$('appearance').value.trim()) throw new Error('Enter a mission brief.');
     const body={appearance:$('appearance').value.trim()};
     if(status.mode==='hardware') body.readiness=Object.fromEntries(readinessNames.map(name=>[name,$(name).checked]));
     const result=await command('mission',body);
     if(result.mission_id) {status.mission_id=result.mission_id;status.state='preparing';}
-    readinessNames.forEach(name=>$(name).checked=false); $('capture').hidden=true;
+    readinessNames.forEach(name=>$(name).checked=false); $('capture').hidden=true; capturedKey=null;
     await refresh();
   } catch(e) {error('Submission outcome: '+e.message+'. Check mission status before trying again.');}
   finally {pending=false; render();}
@@ -150,6 +155,7 @@ async function preview() {
   setTimeout(preview,200);
 }
 $('start').addEventListener('click',start); $('stop').addEventListener('click',stop);
+$('appearance').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing){e.preventDefault();start();}});
 readinessNames.forEach(name=>$(name).addEventListener('change',render));
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();stop();}});
 if(!token) error('Open the operator link printed by the stand service to enable controls.');

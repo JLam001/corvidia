@@ -103,6 +103,43 @@ def test_success_submits_one_prompt_and_returns_while_onboard_mission_is_active(
     assert all(api.token not in row for row in output)
 
 
+def test_timed_brief_is_validated_and_submitted_once_without_execution_overrides():
+    control, api, _, _ = runner()
+    brief = "find as many people as possible within 30 seconds"
+    assert control.run(brief) == 0
+    assert api.posts == [("mission", {"appearance": brief})]
+
+
+@pytest.mark.parametrize("brief", ["find people for 61 seconds",
+                                   "find people with glasses for 30 seconds"])
+def test_invalid_timed_brief_does_not_contact_supervisor(brief):
+    control, api, _, _ = runner()
+    assert control.run(brief) == 1
+    assert api.status_calls == 0 and not api.posts
+
+
+def test_collection_progress_updates_for_new_capture_with_same_countdown_second():
+    control, api, _, output = runner()
+    api.state.update(completion_mode="timed_collection", state="searching", remaining_ms=8000,
+                     capture_count=1)
+    control._display(api.state)
+    api.state["capture_count"] = 2
+    control._display(api.state)
+    control._display(api.state)
+    assert len(output) == 2
+    assert "8.0s remaining · 1 capture saved" in output[0]
+    assert "2 captures saved" in output[1]
+
+
+@pytest.mark.parametrize("count", [0, 2])
+def test_collection_completion_summarizes_saved_captures_after_verified_stop(count):
+    control, api, _, output = runner()
+    api.state.update(completion_mode="timed_collection", state="complete", capture_count=count,
+                     motor={"stop_status": "verified", "zero_confirmed": True})
+    assert control._result(api.state) == 0
+    assert output[-1] == f"Timed search complete: {count} captures saved."
+
+
 @pytest.mark.parametrize("mode,hardware", [("hardware", False), ("observe", True), ("telemetry", False)])
 def test_mode_mismatch_never_submits(mode, hardware):
     control, api, _, output = runner(Api(mode=mode), stdin=Input(True))

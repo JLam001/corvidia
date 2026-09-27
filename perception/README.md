@@ -3,6 +3,12 @@
 For the integrated camera, person-description mission, live IMU, and bounded
 motor interface, see the [stand demo guide](STAND_DEMO.md). Its default
 observation mode uses real perception with simulated motor commands.
+Ordinary briefs stop after the first saved match. A brief such as
+**find as many people as possible within 30 seconds** collects matching images
+for the requested duration (1–60 seconds). The console shows the capture count
+and latest image; the full collection is stored on the Jetson. See
+[timed collection missions](STAND_DEMO.md#timed-collection-missions) for behavior
+and counting limits.
 
 Implements [`docs/event-pipeline.md`](../docs/event-pipeline.md):
 

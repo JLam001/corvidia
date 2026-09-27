@@ -47,7 +47,7 @@ def request(web, method, path, body=None, *, token=True, headers=None):
 def test_local_dashboard_never_embeds_operator_token(web):
     code, headers, body = request(web, "GET", "/?token=example")
     assert code == 200
-    assert b"Stand mission" in body
+    assert b"Search &amp; Rescue" in body or b"Search & Rescue" in body
     assert web[0].token.encode() not in body
     assert headers["Referrer-Policy"] == "no-referrer"
     assert headers["X-Frame-Options"] == "DENY"
@@ -69,6 +69,19 @@ def test_mission_does_not_accept_user_motor_settings(web):
     assert web[1] == [dict(action="mission", appearance="red shirt", readiness={})]
 
 
+def test_timed_brief_is_forwarded_as_data_without_client_execution_settings(web):
+    brief = "find as many people as possible within 30 seconds"
+    assert request(web, "POST", "/api/mission", {"appearance": brief})[0] == 202
+    assert web[1] == [dict(action="mission", appearance=brief, readiness={})]
+
+
+@pytest.mark.parametrize("brief", ["find people for 61 seconds", "find people for zero seconds",
+                                   "find people wearing a blue polo and glasses for 30 seconds"])
+def test_invalid_timed_briefs_do_not_reach_supervisor(web, brief):
+    assert request(web, "POST", "/api/mission", {"appearance": brief})[0] == 400
+    assert web[1] == []
+
+
 @pytest.mark.parametrize("appearance", ["person in a blue polo and glasses", "red shirt with stripes",
                                       "person carrying a bag"])
 def test_unsupported_traits_return_actionable_400_without_queueing(web, appearance):
@@ -82,6 +95,7 @@ def test_unsupported_traits_return_actionable_400_without_queueing(web, appearan
     {"percent": True}, {"percent": 0}, {"percent": 20.01}, {"percent": float("nan")},
     {"duration_ms": 60001}, {"duration_ms": 1000.0}, {"duration_ms": True},
     {"appearance": "x" * 241}, {"appearance": {}}, {"appearance": "  "}, {"throttle": 50},
+    {"completion_mode": "timed_collection"}, {"capture_count": 20},
 ])
 def test_invalid_preparation_never_reaches_supervisor(web, changes):
     body = dict(appearance="red shirt")
