@@ -31,13 +31,22 @@ class BackendInfo:
     backend_version: str
 
 
+@dataclass(frozen=True)
+class BackendReply:
+    """Response text plus optional server-reported usage and timings."""
+
+    text: str
+    usage: dict | None = None
+    timings: dict | None = None
+
+
 class ConfirmerBackend(Protocol):
     """A local model server. Implementations must not retry transport errors."""
 
     info: BackendInfo
 
-    def submit(self, request: ConfirmRequest) -> Future[str]:
-        """Start one request; the future yields raw response text or raises BackendError."""
+    def submit(self, request: ConfirmRequest) -> Future[str | BackendReply]:
+        """Start one request; the future yields the raw response or raises BackendError."""
         ...
 
     def cancel(self, request_id: str) -> bool:
@@ -70,15 +79,22 @@ def parse_answer(text: str) -> tuple[Result, str]:
     return result, "ambiguous" if result is Result.UNKNOWN else f"answer_{answer}"
 
 
-def normalize(future: Future[str]) -> tuple[Result, str]:
-    """Map a finished backend future to (result, reason)."""
+def normalize(future: Future) -> tuple[Result, str, dict]:
+    """Map a finished backend future to (result, reason, model I/O details)."""
     try:
-        text = future.result(timeout=0)
+        reply = future.result(timeout=0)
     except BackendError as e:
-        return Result.UNKNOWN, e.reason
+        return Result.UNKNOWN, e.reason, {"error": str(e) or e.reason}
     except Exception as e:  # noqa: BLE001 - adapter bugs still map to unknown
-        return Result.UNKNOWN, f"inference_error:{type(e).__name__}"
-    return parse_answer(text)
+        return Result.UNKNOWN, f"inference_error:{type(e).__name__}", {"error": repr(e)}
+    if isinstance(reply, BackendReply):
+        details = {"raw_output": reply.text, "usage": reply.usage, "timings": reply.timings}
+        text = reply.text
+    else:
+        details = {"raw_output": reply}
+        text = reply
+    result, reason = parse_answer(text)
+    return result, reason, details
 
 
 Responder = Callable[[ConfirmRequest], "str | BaseException | None"]

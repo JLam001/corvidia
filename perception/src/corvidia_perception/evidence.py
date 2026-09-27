@@ -32,11 +32,18 @@ class StorageError(Exception):
     pass
 
 
-def encode_jpeg(array: np.ndarray, quality: int, color_order: str = "bgr") -> bytes:
+def encode_jpeg(array: np.ndarray, quality: int, color_order: str = "bgr",
+                max_side: int = 0) -> bytes:
+    """Encode to JPEG, downscaling so the longer side is at most `max_side` (0: never)."""
     if array.ndim == 3 and array.shape[2] == 3 and color_order == "bgr":
         array = array[:, :, ::-1]
+    image = Image.fromarray(np.ascontiguousarray(array))
+    if max_side and max(image.size) > max_side:
+        scale = max_side / max(image.size)
+        size = (max(1, round(image.width * scale)), max(1, round(image.height * scale)))
+        image = image.resize(size, Image.Resampling.LANCZOS)
     buf = io.BytesIO()
-    Image.fromarray(np.ascontiguousarray(array)).save(buf, format="JPEG", quality=quality)
+    image.save(buf, format="JPEG", quality=quality)
     return buf.getvalue()
 
 

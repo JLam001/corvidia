@@ -58,6 +58,10 @@ class ConfirmationWorker:
         self._draining_since = 0.0
 
     @property
+    def backend_info(self):
+        return self._backend.info
+
+    @property
     def available(self) -> bool:
         return self.state is not WorkerState.UNAVAILABLE
 
@@ -99,7 +103,7 @@ class ConfirmationWorker:
     def _dispatch(self, c: Candidate, now: float) -> None:
         color = self._cfg.crop.color_order
         quality = self._cfg.confirm.jpeg_quality
-        crop_jpeg = encode_jpeg(c.crop, quality, color)
+        crop_jpeg = encode_jpeg(c.crop, quality, color, self._cfg.confirm.max_image_side)
         record = self._record(c, crop_jpeg, now)
         if self._store is not None:
             frame_jpeg = encode_jpeg(c.frame, quality, color) if c.frame is not None else None
@@ -125,8 +129,8 @@ class ConfirmationWorker:
         f = self._inflight
         assert f is not None
         if f.future.done():
-            result, reason = normalize(f.future)
-            self._finish(f, result, reason, now)
+            result, reason, details = normalize(f.future)
+            self._finish(f, result, reason, now, details)
             self._inflight = None
             self.state = WorkerState.IDLE
         elif now >= f.deadline:
@@ -152,7 +156,8 @@ class ConfirmationWorker:
             for c in self._queue.drain():
                 self._skip(c, SkipReason.BACKEND_UNAVAILABLE, now)
 
-    def _finish(self, f: _InFlight, result: Result, reason: str, now: float) -> None:
+    def _finish(self, f: _InFlight, result: Result, reason: str, now: float,
+                details: dict | None = None) -> None:
         if result is Result.UNKNOWN:
             self._health.incr(f"unknown_{reason.split(':')[0]}")
         self._health.incr(f"result_{result.value}")
@@ -164,6 +169,7 @@ class ConfirmationWorker:
             reason=reason,
             inference_duration_s=now - f.dispatched,
             committed_wall=self._wall(),
+            model_io=details,
         )
         committed = True
         if self._store is not None:

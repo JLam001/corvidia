@@ -243,13 +243,13 @@ name = "corvidia-perception"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "lap" },
     { name = "numpy" },
     { name = "pillow" },
 ]
 
 [package.optional-dependencies]
 detector = [
-    { name = "lap" },
     { name = "onnx", version = "1.19.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
     { name = "onnx", version = "1.23.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13'" },
     { name = "onnxslim" },
@@ -267,7 +267,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "lap", marker = "extra == 'detector'", specifier = ">=0.5.12" },
+    { name = "lap", specifier = ">=0.5.12" },
     { name = "numpy", specifier = ">=1.26,<2" },
     { name = "onnx", marker = "extra == 'detector'", specifier = ">=1.16" },
     { name = "onnxslim", marker = "extra == 'detector'", specifier = ">=0.1.60" },

@@ -3,13 +3,14 @@
 Examples (on the Jetson, from ~/corvidia/perception):
 
     # Accuracy replay: every frame, event logic on video time, instant stub confirmer
+    # (with --confirmer cosmos, each confirmation is awaited before the next frame)
     uv run corvidia-run --video /usr/share/opencv4/samples/data/vtest.avi --mode every
 
     # Timing replay: real-time pacing (optionally sped up) with frame dropping
     uv run corvidia-run --video vtest.avi --mode realtime --speed 3
 
-    # Live CSI camera with browser preview at http://192.168.2.2:8080/
-    uv run corvidia-run --camera --preview-port 8080
+    # Live CSI camera with Cosmos and browser preview at http://192.168.2.2:8080/
+    uv run corvidia-run --camera --confirmer cosmos --preview-port 8080
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ import dataclasses
 import json
 import resource
 import signal
+import sys
 import threading
 import time
 from collections import Counter, deque
@@ -28,7 +30,9 @@ import numpy as np
 
 from .config import PipelineConfig, load_config
 from .confirmer import DelayedStubBackend, StubBackend
-from .detector import PersonTracker, YoloDetector
+from .cosmos import LlamaCppBackend, LlamaCppConfig
+from .worker import WorkerState
+from .detector import PersonTracker, make_detector
 from .gate import Phase
 from .pipeline import EventPipeline
 from .preview import PreviewServer, PreviewState
@@ -61,7 +65,9 @@ class ReplayClock:
 class SystemSampler:
     """Peak system memory and temperatures, sampled on a background thread."""
 
-    def __init__(self, interval_s: float = 2.0) -> None:
+    def __init__(self, interval_s: float = 2.0, health=None, min_available_mb: int = 0) -> None:
+        self._health = health
+        self._min_available_mb = min_available_mb
         self.min_available_kb: int | None = None
         self.mem_total_kb: int | None = None
         self.max_temp_c: dict[str, float] = {}
@@ -79,6 +85,13 @@ class SystemSampler:
             avail = info["MemAvailable"]
             if self.min_available_kb is None or avail < self.min_available_kb:
                 self.min_available_kb = avail
+            if self._health is not None:
+                self._health.set("mem_available_mb", avail // 1024)
+                if avail // 1024 < self._min_available_mb:
+                    self._health.fault("memory_low", f"{avail // 1024} MB available, "
+                                       f"floor {self._min_available_mb} MB")
+                else:
+                    self._health.clear_fault("memory_low")
         except (OSError, KeyError, ValueError):
             pass
         for zone in Path("/sys/class/thermal").glob("thermal_zone*"):
@@ -100,7 +113,9 @@ class SystemSampler:
         peak_used = None
         if self.mem_total_kb and self.min_available_kb is not None:
             peak_used = (self.mem_total_kb - self.min_available_kb) / 1024
-        return {"peak_system_used_mb": peak_used, "max_temp_c": self.max_temp_c}
+        min_avail = self.min_available_kb // 1024 if self.min_available_kb is not None else None
+        return {"peak_system_used_mb": peak_used, "min_available_mb": min_avail,
+                "max_temp_c": self.max_temp_c}
 
 
 def pct(values, qs=(50, 95, 99)) -> dict[str, float | None]:
@@ -126,8 +141,9 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--config", type=Path, help="TOML config (sections mirror PipelineConfig)")
     ap.add_argument("--model", help="override detector model (.pt or .engine)")
     ap.add_argument("--events", type=Path, help="override storage root")
-    ap.add_argument("--confirmer", choices=sorted(STUB_ANSWERS), default="yes",
-                    help="stub confirmer answer (Cosmos is step 3)")
+    ap.add_argument("--confirmer", choices=["cosmos", *sorted(STUB_ANSWERS)], default="yes",
+                    help="'cosmos' uses the local llama-server; otherwise a stub answer")
+    ap.add_argument("--cosmos-url", default=LlamaCppConfig.url)
     ap.add_argument("--stub-delay", type=float, default=0.8,
                     help="stub inference delay in realtime modes, seconds")
     ap.add_argument("--preview-port", type=int, default=None, help="serve MJPEG preview on this port")
@@ -153,7 +169,7 @@ def run(argv: list[str] | None = None) -> dict:
 
     # Load and warm up the detector first so a live camera does not queue frames
     # during CUDA initialization.
-    detector = YoloDetector(cfg.detector)
+    detector = make_detector(cfg.detector)
     if args.camera:
         w, h = (int(x) for x in args.camera_size.lower().split("x"))
         detector.warmup((h, w, 3))
@@ -171,13 +187,19 @@ def run(argv: list[str] | None = None) -> dict:
 
     # -- tracker, pipeline -------------------------------------------------------------
     tracker = PersonTracker(dataclasses.replace(cfg.tracker, frame_rate=round(source.fps)))
-    answer = STUB_ANSWERS[args.confirmer]
-    if realtime:
+    if args.confirmer == "cosmos":
+        backend = LlamaCppBackend(LlamaCppConfig(url=args.cosmos_url))
+        if not backend.healthy():
+            source.close()
+            raise SystemExit(f"llama-server not healthy at {args.cosmos_url} "
+                             "(sudo systemctl status cosmos-server)")
+    elif realtime:
+        answer = STUB_ANSWERS[args.confirmer]
         backend = DelayedStubBackend(args.stub_delay, lambda _r: answer)
-        clock = time.monotonic
     else:
+        answer = STUB_ANSWERS[args.confirmer]
         backend = StubBackend(lambda _r: answer)
-        clock = ReplayClock()
+    clock = time.monotonic if realtime else ReplayClock()
     extra = {"detector": {"model": detector.model_path, "imgsz": cfg.detector.imgsz,
                           "tracker": "bytetrack", "tracker_config": dataclasses.asdict(cfg.tracker)}}
     pipe = EventPipeline(cfg, backend, clock=clock, record_extra=extra)
@@ -187,12 +209,15 @@ def run(argv: list[str] | None = None) -> dict:
         pipe.open()
 
     det_ms: deque[float] = deque(maxlen=200_000)
+    # Detector time split by whether a confirmation was in flight (GPU contention).
+    det_ms_confirming: deque[float] = deque(maxlen=200_000)
+    det_ms_idle: deque[float] = deque(maxlen=200_000)
     loop_ms: deque[float] = deque(maxlen=200_000)
     age_ms: deque[float] = deque(maxlen=200_000)
     dropped = 0
     processed = 0
     last_id: dict[int, int] = {}
-    sampler = SystemSampler()
+    sampler = SystemSampler(health=pipe.health, min_available_mb=cfg.system.min_available_mb)
     preview = None
     if args.preview_port is not None:
         preview = PreviewServer(args.preview_port, health_fn=lambda: health_view())
@@ -253,8 +278,15 @@ def run(argv: list[str] | None = None) -> dict:
             pipe.on_frame(frame, dets)
             if not realtime:
                 pipe.tick()
+                # Accuracy replay waits for each confirmation (video time is frozen,
+                # so the deadline cannot fire; the HTTP timeout bounds the wait).
+                while pipe.worker.state is WorkerState.ACTIVE and not stop.is_set():
+                    time.sleep(0.005)
+                    pipe.tick()
             processed += 1
             det_ms.append(detector.last_ms)
+            (det_ms_confirming if pipe.worker.state is WorkerState.ACTIVE
+             else det_ms_idle).append(detector.last_ms)
             loop_ms.append((time.monotonic() - t0) * 1000)
             pipe.health.set("detector_ms", round(detector.last_ms, 1))
             pipe.health.set("processed", processed)
@@ -282,6 +314,8 @@ def run(argv: list[str] | None = None) -> dict:
 
     report = _report(args, cfg, pipe, source, detector, processed, dropped, elapsed,
                      det_ms, loop_ms, age_ms, system)
+    report["detector_ms_while_confirming"] = pct(det_ms_confirming)
+    report["detector_ms_while_idle"] = pct(det_ms_idle)
     if pipe.store is not None:
         (pipe.store.session_dir / "run_report.json").write_text(json.dumps(report, indent=2, default=str))
     if not args.quiet:
@@ -333,19 +367,20 @@ def _report(args, cfg, pipe, source, detector, processed, dropped, elapsed, det_
     if pipe.store is not None and (pipe.store.session_dir / "skips.jsonl").exists():
         for line in (pipe.store.session_dir / "skips.jsonl").read_text().splitlines():
             skips[json.loads(line)["reason"]] += 1
-    try:
-        import torch
-
-        gpu_peak = torch.cuda.max_memory_allocated() / 2**20 if torch.cuda.is_available() else None
-    except Exception:  # noqa: BLE001
-        gpu_peak = None
+    gpu_peak = None
+    torch = sys.modules.get("torch")  # only when a .pt model loaded it; never import it here
+    if torch is not None and torch.cuda.is_available():
+        gpu_peak = torch.cuda.max_memory_allocated() / 2**20
     return {
         "session_id": pipe.session_id,
         "source": source.source_id,
         "mode": "camera" if args.camera else (args.mode or "every"),
         "speed": args.speed,
         "model": detector.model_path,
-        "confirmer": f"stub:{args.confirmer}",
+        "detector_runtime": type(detector).__name__,
+        "torch_loaded": "torch" in sys.modules,
+        "confirmer": ("cosmos:" + pipe.worker.backend_info.model_revision
+                      if args.confirmer == "cosmos" else f"stub:{args.confirmer}"),
         "elapsed_s": round(elapsed, 2),
         "frames_processed": processed,
         "frames_dropped": dropped,

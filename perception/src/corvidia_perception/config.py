@@ -55,6 +55,9 @@ class ConfirmConfig:
     retry_cooldown_s: float = 5.0
     prompt: str = DEFAULT_PROMPT
     jpeg_quality: int = 95
+    # Longest side of the image sent to the model. Bounds image tokens (Qwen3-VL:
+    # about one token per 32x32 px); the saved crop.jpg is this exact image.
+    max_image_side: int = 448
 
 
 @dataclass(frozen=True)
@@ -83,7 +86,8 @@ class TrackerConfig:
 
 @dataclass(frozen=True)
 class DetectorConfig:
-    model: str = "~/models/yolo11n.pt"
+    # A TensorRT engine runs without PyTorch; build it once with deploy/export_yolo.sh.
+    model: str = "~/models/yolo11n.engine"
     device: str = "0"
     imgsz: int = 640
     # Low threshold so ByteTrack's second association stage sees weak boxes;
@@ -91,6 +95,13 @@ class DetectorConfig:
     predict_conf: float = 0.1
     iou: float = 0.7
     half: bool = False
+
+
+@dataclass(frozen=True)
+class SystemConfig:
+    # Raise a memory_low fault when available RAM drops below this. The Jetson's
+    # CPU and GPU share 7.5 GB; keep real headroom, not just enough to fit.
+    min_available_mb: int = 1536
 
 
 @dataclass(frozen=True)
@@ -102,6 +113,7 @@ class PipelineConfig:
     storage: StorageConfig = field(default_factory=StorageConfig)
     detector: DetectorConfig = field(default_factory=DetectorConfig)
     tracker: TrackerConfig = field(default_factory=TrackerConfig)
+    system: SystemConfig = field(default_factory=SystemConfig)
 
 
 def load_config(path: str | Path) -> PipelineConfig:

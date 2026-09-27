@@ -8,12 +8,14 @@ dependencies = [
     # The Jetson's system OpenCV (GStreamer/Argus build) is compiled against NumPy 1.x.
     "numpy>=1.26,<2",
     "pillow>=10.0",
+    "lap>=0.5.12",
 ]
 
 [project.optional-dependencies]
+# Tooling only (engine export, .pt comparison, parity tests). The live pipeline
+# runs the TensorRT engine and never imports PyTorch or Ultralytics.
 detector = [
     "ultralytics==8.3.*",
-    "lap>=0.5.12",
     "torch>=2.9",
     "torchvision>=0.24",
     "onnx>=1.16",
@@ -23,6 +25,7 @@ detector = [
 [project.scripts]
 corvidia-simulate = "corvidia_perception.simulate:main"
 corvidia-run = "corvidia_perception.run:main"
+corvidia-cosmos-eval = "corvidia_perception.cosmos_eval:main"
 
 [dependency-groups]
 dev = ["pytest>=8.0"]
