@@ -449,6 +449,11 @@ establishes the existing event behavior, not stand-control readiness. Validate:
 Historical test: the user subsequently selected 7.5% or less for the deadline
 demo after suspecting a supply trip. The current mission target is 5%, with a
 7.5% host cap. The prepared v6 ramp image was deferred and was not flashed.
+The lower-input host changes passed 197 focused tests on the Jetson. A
+10-second hardware check (`efb3ef5a35904a76a8f1a2826336d915`) reported DShot147
+on all four channels, then a stop ACK and fresh zero inputs. It saved no
+captures. Trace: `~/corvidia-data/integration/powered-demo-5pct-10s.json`.
+PSU behavior and physical movement/stopping require the operator's observation.
 
 The console's Begin search button was exercised directly on the Jetson using
 `find as many people in 30 seconds`. This shorter wording previously failed
