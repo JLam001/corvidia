@@ -21,6 +21,24 @@ from .health import Health
 from .records import SCHEMA_VERSION, Candidate, Completion, ConfirmRequest, Result, Skip, SkipReason
 
 
+def target_crop(candidate: Candidate):
+    """Mark only the selected box on a private copy; the source stays unaltered."""
+    import cv2
+
+    image = candidate.crop.copy()
+    box, region = candidate.detection.bbox, candidate.crop_region
+    h, w = image.shape[:2]
+    x1, y1 = max(0, int(box.x1 - region.x1)), max(0, int(box.y1 - region.y1))
+    x2 = min(w - 1, int(box.x2 - region.x1) - 1)
+    y2 = min(h - 1, int(box.y2 - region.y1) - 1)
+    color = (0, 255, 255)  # bright outline, with no fill covering clothing
+    thickness = max(1, round(max(w, h) / 448))
+    cv2.rectangle(image, (x1, y1), (x2, y2), color, thickness)
+    cv2.putText(image, "TARGET", (x1, max(10, y1 - 4)), cv2.FONT_HERSHEY_SIMPLEX,
+                max(0.3, max(w, h) / 1100), color, thickness, cv2.LINE_AA)
+    return image
+
+
 class WorkerState(enum.StrEnum):
     IDLE = "idle"
     ACTIVE = "active"
@@ -47,7 +65,8 @@ class ConfirmationWorker:
     def __init__(self, cfg: PipelineConfig, queue: ConfirmationQueue, backend: ConfirmerBackend,
                  store: EvidenceStore | None, health: Health, emit: Emit,
                  wall: Callable[[], float] = time.time, record_extra: dict | None = None,
-                 depth=None, clock: Callable[[], float] | None = None) -> None:
+                 depth=None, clock: Callable[[], float] | None = None, *,
+                 appearance: str | None = None, notify: Callable[[dict], None] | None = None) -> None:
         self._cfg = cfg
         # Pipeline clock, read again at submit so evidence writes do not eat the deadline.
         self._clock = clock
@@ -59,7 +78,15 @@ class ConfirmationWorker:
         self._health = health
         self._emit = emit
         self._wall = wall
-        self._prompt_sha256 = hashlib.sha256(cfg.confirm.prompt.encode()).hexdigest()
+        self._appearance = appearance
+        self._notify = notify or (lambda _: None)
+        if appearance is not None:
+            from .cosmos import APPEARANCE_SYSTEM, validate_appearance
+
+            validate_appearance(appearance)
+            self._prompt_sha256 = hashlib.sha256(APPEARANCE_SYSTEM.encode()).hexdigest()
+        else:
+            self._prompt_sha256 = hashlib.sha256(cfg.confirm.prompt.encode()).hexdigest()
         self.state = WorkerState.IDLE
         self._inflight: _InFlight | None = None
         self._draining_since = 0.0
@@ -108,9 +135,11 @@ class ConfirmationWorker:
     # -- internals ----------------------------------------------------------------------
 
     def _dispatch(self, c: Candidate, now: float) -> None:
+        self._stage(c, "saving", "candidate")
         color = self._cfg.crop.color_order
         quality = self._cfg.confirm.jpeg_quality
-        crop_jpeg = encode_jpeg(c.crop, quality, color, self._cfg.confirm.max_image_side)
+        crop = target_crop(c) if self._appearance is not None else c.crop
+        crop_jpeg = encode_jpeg(crop, quality, color, self._cfg.confirm.max_image_side)
         record = self._record(c, crop_jpeg, now)
         if self._store is not None:
             frame_jpeg = (encode_jpeg(c.frame, quality, color)
@@ -120,8 +149,11 @@ class ConfirmationWorker:
             except StorageError as e:
                 self._skip(c, SkipReason.STORAGE_ERROR, now, str(e))
                 return
-        request = ConfirmRequest(c.event_id, crop_jpeg, self._cfg.confirm.prompt,
-                                 {"prompt_sha256": self._prompt_sha256})
+        metadata = {"prompt_sha256": self._prompt_sha256}
+        if self._appearance is not None:
+            metadata["target_appearance"] = self._appearance
+        request = ConfirmRequest(c.event_id, crop_jpeg, self._cfg.confirm.prompt, metadata)
+        self._stage(c, "confirming", "inference")
         try:
             future = self._backend.submit(request)
         except Exception as e:  # noqa: BLE001 - submission failure is an unknown result
@@ -189,6 +221,7 @@ class ConfirmationWorker:
         )
         if f.depth is not None:
             record.update(distance_m=f.depth.get("distance_m"), depth=f.depth)
+        self._stage(f.candidate, "saving", "result")
         committed = True
         if self._store is not None:
             try:
@@ -198,10 +231,34 @@ class ConfirmationWorker:
         c = f.candidate
         distance = f.depth.get("distance_m") if f.depth else None
         self._emit(Completion(c.key, c.event_id, result, reason, committed, distance))
+        self._notify({**self._identity(c), "type": "completion", "result": result.value,
+                      "reason": reason, "committed": committed,
+                      "commit_mono": time.monotonic(),
+                      "path": str((self._store.session_dir / c.event_id).resolve())
+                      if self._store is not None else None})
+
+    @staticmethod
+    def _identity(c: Candidate) -> dict:
+        info = c.frame_info
+        return {"session_id": c.key.session_id, "event_id": c.event_id,
+                "source_epoch": c.key.source_epoch, "frame_id": info.frame_id,
+                "capture_mono": info.capture_ts
+                if info.capture_clock.value == "host_monotonic" else info.arrival_mono}
+
+    def _stage(self, c: Candidate, stage: str, phase: str) -> None:
+        mono = time.monotonic()
+        self._notify({**self._identity(c), "type": "stage", "stage": stage,
+                      "phase": phase, "started_mono": mono, "mono": mono})
 
     def _skip(self, c: Candidate, reason: SkipReason, now: float, detail: str = "") -> None:
         self._health.incr(f"skipped_{reason.value}")
         self._emit(Skip(c.key, c.event_id, reason, now, detail))
+        self._notify({**self._identity(c), "type": "skip", "reason": reason.value,
+                      "detail": detail, "mono": time.monotonic()})
+        if reason in (SkipReason.STORAGE_ERROR, SkipReason.BACKEND_UNAVAILABLE):
+            self._notify({**self._identity(c), "type": "fault",
+                          "reason": reason.value + (": " + detail if detail else ""),
+                          "mono": time.monotonic()})
 
     def _record(self, c: Candidate, crop_jpeg: bytes, now: float) -> dict:
         info, det, cfg = c.frame_info, c.detection, self._cfg
@@ -263,4 +320,8 @@ class ConfirmationWorker:
             "distance_m": None,
             "location_status": "unavailable",
             **self._record_extra,
+            **({"target": {"class_name": "person", "appearance": self._appearance,
+                           "appearance_sha256": hashlib.sha256(self._appearance.encode()).hexdigest(),
+                           "crop_annotation": "TARGET box"}}
+               if self._appearance is not None else {}),
         }

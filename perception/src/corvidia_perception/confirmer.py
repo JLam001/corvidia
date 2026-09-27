@@ -70,7 +70,7 @@ def parse_answer(text: str) -> tuple[Result, str]:
         payload = json.loads(text)
     except (json.JSONDecodeError, TypeError):
         return Result.UNKNOWN, "malformed_output"
-    if not isinstance(payload, dict):
+    if not isinstance(payload, dict) or set(payload) != {"answer"}:
         return Result.UNKNOWN, "malformed_output"
     answer = payload.get("answer")
     if not isinstance(answer, str) or answer not in _ANSWERS:

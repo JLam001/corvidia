@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Corvidia · Stand mission</title>
+<style>
+:root{color-scheme:dark;font:15px/1.5 system-ui,sans-serif;background:#0a1019;color:#e9eef5}
+*{box-sizing:border-box}body{margin:0}main{max-width:1280px;margin:auto;padding:28px}
+header{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:24px}
+h1{font-size:25px;letter-spacing:-.5px;margin:0}h2{font-size:17px;margin:0 0 16px}
+p{margin:8px 0}.muted{color:#aab8ca}.eyebrow{font-size:11px;letter-spacing:2px;color:#7fd8ca;font-weight:700}
+.badge{display:inline-block;padding:5px 12px;border-radius:30px;background:#173331;color:#b5f4e5;font-weight:650}
+.hardware{background:#533116;color:#ffd4a0}.layout{display:grid;grid-template-columns:minmax(300px,.8fr) minmax(400px,1.5fr);gap:20px}
+.panel{border:1px solid #283548;border-radius:14px;background:#111c2a;padding:22px}.stack{display:grid;gap:20px;align-content:start}
+label{display:block;margin:12px 0 6px;font-weight:600}input,textarea,button{font:inherit}
+textarea,input[type=number]{width:100%;color:inherit;background:#09131f;border:1px solid #3b4b60;border-radius:7px;padding:10px}
+textarea{resize:vertical;min-height:82px}input:focus,textarea:focus,button:focus{outline:2px solid #77dac9;outline-offset:3px}
+.fields{display:grid;grid-template-columns:1fr 1fr;gap:16px}.small{font-size:12px;color:#aab8ca}
+button{border:0;border-radius:7px;padding:11px 16px;cursor:pointer;background:#80dfcd;color:#092820;font-weight:750}
+button.secondary{background:#2b4056;color:#e9eef5}button:disabled{opacity:.4;cursor:not-allowed}
+.buttons{display:flex;gap:10px;margin-top:18px;flex-wrap:wrap}.stop{background:#e75964;color:#fff;flex:1}
+.checks{border:1px solid #3b4b60;border-radius:8px;padding:10px 13px;margin:16px 0}
+.checks label{display:flex;align-items:flex-start;gap:9px;font-size:13px;font-weight:450;margin:8px 0}.checks input{margin-top:4px;accent-color:#80dfcd}
+.video{width:100%;aspect-ratio:16/9;object-fit:contain;background:#05090f;border-radius:8px;display:block}
+.guidance{font-size:27px;font-weight:750;letter-spacing:-.4px;min-height:42px;color:#a1ecdf}
+.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:18px}.metric{border-top:1px solid #334054;padding-top:10px}.value{font-size:22px;font-weight:650}
+.notice{padding:12px;border-radius:7px;background:#182b40;color:#c5ddf5}.error{color:#ffb8bd;min-height:23px;white-space:pre-wrap}
+pre{font:12px/1.5 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere;max-height:360px;overflow:auto}
+summary{cursor:pointer;color:#b3c8dd}.capture[hidden]{display:none}.capture img{width:100%;border-radius:8px}.link-state{font-size:12px;color:#9bb1c5}
+@media(max-width:850px){main{padding:16px}.layout{grid-template-columns:1fr}header{align-items:flex-start}.metrics{gap:8px}.guidance{font-size:23px}}
+</style>
+</head>
+<body>
+<main>
+<header><div><div class="eyebrow">CORVIDIA / OPERATOR CONSOLE</div><h1>Stand mission</h1></div><div><span id="mode" class="badge">Connecting</span><p id="connection" class="link-state" role="status">Waiting for the supervisor</p></div></header>
+<div class="layout">
+<section class="panel">
+<h2>Find a person</h2>
+<p class="muted">Describe visible clothing or appearance. The camera searches; you turn the guarded stand using its external handle.</p>
+<label for="appearance">Who should the camera find?</label>
+<textarea id="appearance" maxlength="240" required placeholder="A person wearing a red shirt"></textarea>
+<p class="small">Describe the person to match. This demo supports people.</p>
+<div class="fields"><div><label for="percent">Motor input (%)</label><input id="percent" type="number" min="0.1" max="20" step="0.1" value="5"></div><div><label for="duration">Maximum time (s)</label><input id="duration" type="number" min="1" max="60" step="1" value="10"></div></div>
+<p class="small">Equal input to all four motors. Input is not measured RPM or electrical power. The mission stops early after a confirmed image is saved.</p>
+<div class="buttons"><button id="prepare" class="secondary">Prepare mission</button></div>
+<p id="interpreted" class="notice">Prepare a mission to review the target and checks.</p>
+<fieldset id="readiness" class="checks"><legend>Before each hardware start</legend>
+<label><input id="guarded_stand" type="checkbox">The drone is secured in the guarded stand; turning uses the external handle.</label>
+<label><input id="hands_clear" type="checkbox">Hands, people, and loose cables are clear of the motors and propellers.</label>
+<label><input id="power_disconnect_accessible" type="checkbox">The ESC power disconnect is accessible outside the guarded area.</label>
+<label><input id="esc_startup_finished" type="checkbox">The ESC startup tones have finished.</label>
+<label><input id="motors_still" type="checkbox">All four motors are still before starting.</label>
+</fieldset>
+<div class="buttons"><button id="start" disabled>Start mission</button><button id="stop" class="stop" disabled>Stop · Esc</button></div>
+<p class="small">Keep this page visible. Losing its operator connection ends an active run. After Stop, observe the motors before approaching.</p>
+<p id="error" class="error" role="alert"></p>
+</section>
+<div class="stack">
+<section class="panel"><h2>Camera and guidance</h2><img id="preview" class="video" alt="Live camera preview">
+<p id="camera-status" class="small">Waiting for fresh camera frames</p>
+<p id="guidance" class="guidance" aria-live="polite">Waiting for a mission</p>
+<div class="metrics"><div class="metric"><div class="small">Mission state</div><div id="state" class="value">—</div></div><div class="metric"><div class="small">Time remaining</div><div id="remaining" class="value">—</div></div><div class="metric"><div class="small">Requested input</div><div id="motor-input" class="value">—</div></div></div>
+<p id="zero-status" class="small">Physical motor stopping is not measured.</p></section>
+<section id="capture" class="panel capture" hidden><h2>Saved capture</h2><img id="evidence" alt="Saved mission evidence"><p id="capture-label" class="small"></p></section>
+<section class="panel"><p id="telemetry-source" class="small">Waiting for telemetry source</p><details><summary>Preflight, IMU, and pipeline status</summary><p class="small">Real IMU readings are in the sensor frame. They do not establish flight readiness.</p><pre id="details">Waiting for status</pre></details></section>
+</div>
+</div>
+</main>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+const storageKey = 'corvidia-stand-token:' + location.host;
+let token = params.get('token') || '';
+try {if(token) sessionStorage.setItem(storageKey,token); else token=sessionStorage.getItem(storageKey)||'';} catch (_) {}
+if(params.has('token')) history.replaceState(null,'',location.pathname);
+let status = {}, pending = false, leaseBusy = false, previewUrl = null, evidenceUrl = null, capturedMission = null;
+const readinessNames = ['guarded_stand','hands_clear','power_disconnect_accessible','motors_still','esc_startup_finished'];
+const activeStates = new Set(['starting','running','searching','confirming','saving','stopping']);
+const terminalStates = new Set(['idle','complete','completed','stopped','failed','fault','aborted','expired','cancelled','timeout','timed_out']);
+const guidanceLabels = {hold:'Hold the stand still',search_right:'Turn the stand slowly right',search_left:'Turn the stand slowly left',turn_right:'Turn the stand right',turn_left:'Turn the stand left',left:'Turn the stand left',right:'Turn the stand right',stop:'Stop turning the stand'};
+function error(message) {$('error').textContent=message;}
+async function command(action,body={},keepalive=false) {
+  if(!token) throw new Error('Open the operator link printed by the stand service.');
+  const response=await fetch('/api/'+action,{method:'POST',headers:{'Content-Type':'application/json','X-Corvidia-Token':token},body:JSON.stringify(body),keepalive,signal:AbortSignal.timeout(1500)});
+  const result=await response.json();
+  if(!response.ok) throw new Error(result.error||'Command rejected');
+  return result;
+}
+function modeText(mode) {return {observe:'OBSERVE · motors simulated',telemetry:'TELEMETRY · motors disabled',hardware:'HARDWARE · motor outputs enabled'}[mode]||'Connecting';}
+function render() {
+  const state=String(status.state||'idle').toLowerCase();
+  $('mode').textContent=modeText(status.mode); $('mode').classList.toggle('hardware',status.mode==='hardware');
+  $('state').textContent=state.replaceAll('_',' ');
+  const remaining=status.remaining_ms;
+  $('remaining').textContent=Number.isFinite(remaining)?Math.max(0,remaining/1000).toFixed(1)+' s':'—';
+  const frameAge=status.perception?.frame_age_ms;
+  $('camera-status').textContent=Number.isFinite(frameAge)?'Latest camera frame: '+Math.round(frameAge)+' ms old':'Waiting for fresh camera frames';
+  $('motor-input').textContent=Number.isFinite(status.percent)?status.percent+'%':'—';
+  const guidance=status.guidance;
+  const guide=typeof guidance==='string'?guidance:(guidance?.text||guidance?.action||'Waiting for a mission');
+  $('guidance').textContent=guidanceLabels[guide]||guide;
+  $('interpreted').textContent=status.mission_id?'Target: '+(status.appearance||'Awaiting description')+' · '+status.percent+'% motor input · maximum '+((status.duration_ms||0)/1000)+' seconds':'Prepare a mission to review the target and checks.';
+  $('readiness').hidden=status.mode!=='hardware';
+  const ready=status.mode!=='hardware'||readinessNames.every(name=>$(name).checked);
+  $('start').disabled=pending||!token||status.recovery_required||status.mode==='telemetry'||!status.mission_id||!['prepared','ready'].includes(state)||!ready;
+  $('stop').disabled=!token||!status.mission_id||terminalStates.has(state);
+  $('prepare').disabled=pending||!token||status.recovery_required||activeStates.has(state);
+  const motor=status.motor||{};
+  const zero=motor.zero_confirmed||motor.zero_verified||motor.fresh_zero;
+  $('zero-status').textContent=status.mode==='observe'?'Motor commands are simulated; the mission does not drive hardware.':zero?'Fresh zero-input telemetry confirmed. Observe physical motor stopping before approaching.':'Physical motor stopping is not measured. Await fresh zero-input telemetry and observe the motors.';
+  const readOnlyText=status.mode==='observe'?'IMU telemetry is live and read-only. Motor commands and motor status are simulated.':'IMU and motor-input telemetry are live and read-only. Motor commands are disabled.';
+  $('telemetry-source').textContent={simulated:'IMU and motor status are simulated. Camera and Cosmos are live.',live_read_only:readOnlyText,live:'IMU and motor-input telemetry are live.'}[status.telemetry_mode]||(status.mode==='observe'?'Motor commands and status are simulated.':'Telemetry source pending');
+  $('details').textContent=JSON.stringify({mission_id:status.mission_id,telemetry_mode:status.telemetry_mode,preflight:status.preflight,imu:status.imu,motor:status.motor,perception:status.perception,error:status.error},null,2);
+  if(status.error) error(String(status.error));
+  if(status.recovery_required) error('Stop verification failed. Check physical stopping using the external power disconnect. New missions are blocked until the service is restarted after recovery.');
+}
+async function refresh() {
+  try {
+    const response=await fetch('/api/status',{cache:'no-store',signal:AbortSignal.timeout(1500)});
+    if(!response.ok) throw new Error('Supervisor unavailable');
+    status=await response.json(); render(); $('connection').textContent='Supervisor connected';
+    if(status.evidence_available && status.mission_id!==capturedMission) await showEvidence(status.mission_id);
+  } catch(e) {$('connection').textContent='Connection lost — active mission will stop'; $('start').disabled=true; error(e.message);}
+}
+async function showEvidence(mission) {
+  const response=await fetch('/api/evidence?mission_id='+encodeURIComponent(mission),{headers:{'X-Corvidia-Token':token},signal:AbortSignal.timeout(1500)});
+  if(!response.ok) return;
+  const next=URL.createObjectURL(await response.blob()); if(evidenceUrl) URL.revokeObjectURL(evidenceUrl);
+  evidenceUrl=next; $('evidence').src=next; $('capture').hidden=false; $('capture-label').textContent='Mission '+mission; capturedMission=mission;
+}
+async function prepare() {
+  pending=true; error(''); render();
+  try {
+    const percent=Number($('percent').value), seconds=Number($('duration').value);
+    if(!$('appearance').value.trim()) throw new Error('Describe the visible appearance of the person to match.');
+    if(!Number.isFinite(percent)||percent<=0||percent>20||!Number.isInteger(seconds)||seconds<1||seconds>60) throw new Error('Choose motor input above 0 up to 20%, and 1–60 whole seconds.');
+    await command('prepare',{appearance:$('appearance').value,percent,duration_ms:seconds*1000});
+    readinessNames.forEach(name=>$(name).checked=false); $('capture').hidden=true;
+    await refresh();
+  } catch(e) {error(e.message);} finally {pending=false; render();}
+}
+async function start() {
+  if($('start').disabled) return;
+  pending=true; error(''); render();
+  try {const body={mission_id:status.mission_id};if(status.mode==='hardware') body.readiness=Object.fromEntries(readinessNames.map(name=>[name,$(name).checked]));await command('start',body); readinessNames.forEach(name=>$(name).checked=false); await refresh();}
+  catch(e) {error(e.message);} finally {pending=false; render();}
+}
+async function stop() {
+  if(!status.mission_id) return;
+  try {await command('stop',{mission_id:status.mission_id}); await refresh();} catch(e) {error('Stop could not be acknowledged: '+e.message+'. Use the external power disconnect if needed.');}
+}
+async function lease() {
+  const state=String(status.state||'').toLowerCase();
+  if(document.hidden||leaseBusy||!token||!status.mission_id||!(status.lease_required===true||activeStates.has(state))) return;
+  leaseBusy=true;
+  try {await command('lease',{mission_id:status.mission_id});} catch(e) {$('connection').textContent='Operator lease lost — active mission will stop';} finally {leaseBusy=false;}
+}
+async function preview() {
+  try {const response=await fetch('/frame.jpg',{cache:'no-store',signal:AbortSignal.timeout(1200)}); if(response.ok) {const next=URL.createObjectURL(await response.blob()); if(previewUrl) URL.revokeObjectURL(previewUrl); previewUrl=next; $('preview').src=next;}} catch (_) {}
+  setTimeout(preview,200);
+}
+$('prepare').addEventListener('click',prepare); $('start').addEventListener('click',start); $('stop').addEventListener('click',stop);
+readinessNames.forEach(name=>$(name).addEventListener('change',render));
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();stop();}});
+function backgroundStop(){if(token&&status.mission_id&&(status.lease_required===true||activeStates.has(String(status.state).toLowerCase()))) command('stop',{mission_id:status.mission_id},true).catch(()=>{});}
+document.addEventListener('visibilitychange',()=>{if(document.hidden) backgroundStop();});
+window.addEventListener('pagehide',backgroundStop);
+if(!token) error('Open the operator link printed by the stand service to enable controls.');
+refresh(); preview(); setInterval(refresh,500); setInterval(lease,250);
+</script>
+</body>
+</html>

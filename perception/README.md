@@ -1,5 +1,9 @@
 # Perception: person detection event pipeline
 
+For the integrated camera, person-description mission, live IMU, and bounded
+motor interface, see the [stand demo guide](STAND_DEMO.md). Its default
+observation mode uses real perception with simulated motor commands.
+
 Implements [`docs/event-pipeline.md`](../docs/event-pipeline.md):
 
 - **Step 1, event core:** typed records, candidate lifecycle, bounded queues, stub

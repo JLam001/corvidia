@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 import time
 import uuid
+import queue
 from collections import deque
 from collections.abc import Callable, Sequence
 
@@ -60,7 +61,7 @@ class EventPipeline:
                  clock: Callable[[], float] = time.monotonic,
                  wall: Callable[[], float] = time.time,
                  free_bytes: Callable | None = None, record_extra: dict | None = None,
-                 depth=None) -> None:
+                 depth=None, appearance: str | None = None, observer_queue=None) -> None:
         self.cfg = cfg
         self.clock = clock
         self.session_id = session_id or time.strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8]
@@ -73,8 +74,13 @@ class EventPipeline:
         self._inbox: deque[Completion | Skip] = deque()
         self._skip_log: deque[Skip] = deque()
         self.completions: deque[Completion] = deque(maxlen=256)
+        # Optional observer owns this queue. It never consumes the gate's inbox or
+        # preview's history, and notifications must never block an inference thread.
+        self._observer_queue = observer_queue
+        self.observer_overflow = threading.Event()
         self.worker = ConfirmationWorker(cfg, self.queue, backend, self.store, self.health,
-                                         self._from_worker, wall, record_extra, depth, clock)
+                                         self._from_worker, wall, record_extra, depth, clock,
+                                         appearance=appearance, notify=self._notify)
         self.gate = CandidateGate(cfg, self.queue, self.health, self.session_id, self._accepting)
         self.best = (BestShotTracker(cfg.best_shot, cfg.crop, cfg.gate.min_confidence)
                      if cfg.best_shot.enabled and store else None)
@@ -97,10 +103,16 @@ class EventPipeline:
         self._stop.clear()
 
         def loop() -> None:
-            while not self._stop.is_set():
-                self.tick()
-                self._wake.wait(interval_s)
-                self._wake.clear()
+            try:
+                while not self._stop.is_set():
+                    self.tick()
+                    self._wake.wait(interval_s)
+                    self._wake.clear()
+            except Exception as exc:
+                reason = f"confirmation worker failed: {type(exc).__name__}: {exc}"
+                self.health.fault("worker_thread", reason)
+                self._notify({"type": "fault", "reason": reason, "mono": time.monotonic()})
+                self._stop.set()
 
         self._thread = threading.Thread(target=loop, daemon=True, name="confirmation-worker")
         self._thread.start()
@@ -147,7 +159,17 @@ class EventPipeline:
     # -- internals ----------------------------------------------------------------------
 
     def _accepting(self) -> bool:
-        return self.worker.available and (self.store is None or self.store.accepting())
+        return (not self.observer_overflow.is_set() and self.worker.available
+                and (self.store is None or self.store.accepting()))
+
+    def _notify(self, item: dict) -> None:
+        if self._observer_queue is None or self.observer_overflow.is_set():
+            return
+        try:
+            self._observer_queue.put_nowait(item)
+        except queue.Full:
+            self.observer_overflow.set()
+            self.health.fault("observer_overflow", "bounded observer queue is full")
 
     def _from_worker(self, item: Completion | Skip) -> None:
         self._inbox.append(item)

@@ -21,11 +21,11 @@ from corvidia_perception import simulate
     ('yes', (Result.UNKNOWN, "malformed_output")),
     ('Yes, there is a person.', (Result.UNKNOWN, "malformed_output")),
     ('{"answer": "yes, probably"}', (Result.UNKNOWN, "malformed_output")),
-    ('{"reasoning": "yes", "answer": "no"}', (Result.REJECTED, "answer_no")),
+    ('{"reasoning": "yes", "answer": "no"}', (Result.UNKNOWN, "malformed_output")),
     ('["yes"]', (Result.UNKNOWN, "malformed_output")),
     ('{"answer": "yes"', (Result.UNKNOWN, "malformed_output")),
 ])
-def test_parse_answer_reads_only_the_answer_field(text, expected):
+def test_parse_answer_requires_exact_answer_schema(text, expected):
     assert parse_answer(text) == expected
 
 
