@@ -1,0 +1,56 @@
+[project]
+name = "corvidia-perception"
+version = "0.1.0"
+description = "Scout person detection and confirmation event pipeline"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    # The Jetson's system OpenCV (GStreamer/Argus build) is compiled against NumPy 1.x.
+    "numpy>=1.26,<2",
+    "pillow>=10.0",
+]
+
+[project.optional-dependencies]
+detector = [
+    "ultralytics==8.3.*",
+    "lap>=0.5.12",
+    "torch>=2.9",
+    "torchvision>=0.24",
+    "onnx>=1.16",
+    "onnxslim>=0.1.60",
+]
+
+[project.scripts]
+corvidia-simulate = "corvidia_perception.simulate:main"
+corvidia-run = "corvidia_perception.run:main"
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+# cv2 comes from the Jetson system packages (venv created with
+# --system-site-packages); never install the pip OpenCV wheels over it.
+override-dependencies = [
+    "opencv-python; sys_platform == 'never'",
+    "opencv-python-headless; sys_platform == 'never'",
+]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu130", marker = "sys_platform == 'linux'" }]
+torchvision = [{ index = "pytorch-cu130", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "gpu: needs CUDA and the YOLO weights (runs on the Jetson)",
+    "camera: needs the CSI camera",
+]
