@@ -72,7 +72,7 @@ _ACTION = re.compile(
     r"^(?:please )?(?:find|locate|detect|search for|look for|photograph|capture|"
     r"take (?:a |an )?(?:photo|picture|image|screenshot) of) (.+)$"
 )
-_PERSON = re.compile(r"^(?:(?:a|the|any) )?(?:person|human|someone|somebody|anyone)(?: (.+))?$")
+_PERSON = re.compile(r"^(?:(?:a|the|any) )?(?:person|people|humans?|someone|somebody|anyone)(?: (.+))?$")
 _CLOTHING = re.compile(r"^(?:(?:who is|that is|is) )?(?:wearing|dressed in|in|with) (.+)$")
 _ARTICLE = re.compile(r"^(?:a|an|the) ")
 

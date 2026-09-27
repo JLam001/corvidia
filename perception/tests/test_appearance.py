@@ -4,6 +4,21 @@ import dataclasses
 
 import pytest
 
+
+@pytest.mark.parametrize("phrase", ["Find people", "find humans", "people", "locate people"])
+def test_generic_plural_requests_mean_first_matching_person(phrase):
+    from corvidia_perception.appearance import compile_appearance
+    assert compile_appearance(phrase).to_dict() == {
+        "subject": "human", "upper_color": None, "upper_garment": None,
+    }
+
+
+def test_plural_request_preserves_every_clothing_requirement():
+    from corvidia_perception.appearance import compile_appearance
+    assert compile_appearance("find people wearing a blue polo").to_dict() == {
+        "subject": "human", "upper_color": "blue", "upper_garment": "polo",
+    }
+
 from corvidia_perception.appearance import (
     VERSION, AppearanceRequirements, AppearanceValidationError,
     compile_appearance, evaluate_appearance,
