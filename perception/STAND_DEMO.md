@@ -453,7 +453,13 @@ The lower-input host changes passed 197 focused tests on the Jetson. A
 10-second hardware check (`efb3ef5a35904a76a8f1a2826336d915`) reported DShot147
 on all four channels, then a stop ACK and fresh zero inputs. It saved no
 captures. Trace: `~/corvidia-data/integration/powered-demo-5pct-10s.json`.
-PSU behavior and physical movement/stopping require the operator's observation.
+The operator reported that none of the motors moved during this check. Command
+ACKs and zero-input telemetry therefore do not establish a physical motor test
+pass. After an ESC power cycle, the operator heard startup tones. A separate
+5-second check (`076fb7b006a9448881be0737f8616cb3`) again reported DShot147 on
+all four channels and verified zero inputs afterward. Its physical result has
+not yet been confirmed. Trace:
+`~/corvidia-data/integration/powered-demo-5pct-after-esc-reset.json`.
 
 The console's Begin search button was exercised directly on the Jetson using
 `find as many people in 30 seconds`. This shorter wording previously failed
