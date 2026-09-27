@@ -1,0 +1,17 @@
+{
+  "source": "video:dancetrack0008",
+  "mode": "realtime",
+  "confirmer": "stub:yes",
+  "frames_processed": 73,
+  "frames_dropped": 249,
+  "processed_fps": 5.5,
+  "detector_ms": {
+    "p50": 159.19,
+    "p95": 252.56,
+    "p99": 276.3
+  },
+  "events": 6,
+  "faults": {},
+  "mimic": true,
+  "depth_model": "/home/feder/corvidia-mimic/models/da2-metric-indoor-small-hf"
+}

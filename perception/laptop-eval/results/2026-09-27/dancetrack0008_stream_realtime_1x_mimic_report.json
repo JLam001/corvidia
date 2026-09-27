@@ -1,0 +1,133 @@
+{
+  "clip": "clips/dancetrack0008",
+  "mode": "realtime",
+  "speed": 1.0,
+  "elapsed_s": 13.3,
+  "detector": {
+    "frames_processed": 73,
+    "frames_dropped": 249,
+    "processed_fps": 5.5,
+    "detector_ms": {
+      "p50": 159.19,
+      "p95": 252.56,
+      "p99": 276.3
+    },
+    "loop_ms": {
+      "p50": 168.92,
+      "p95": 257.1,
+      "p99": 286.91
+    },
+    "frame_age_at_detect_ms": {
+      "p50": 17.83,
+      "p95": 38.59,
+      "p99": 91.16
+    }
+  },
+  "depth": {
+    "target_hz": 10.0,
+    "achieved_hz": 1.23,
+    "publishes": 17,
+    "depth_ms": {
+      "p50": 595.9,
+      "p95": 732.66,
+      "p99": 738.93
+    },
+    "age_at_publish_ms": {
+      "p50": 955.7,
+      "p95": 1212.82,
+      "p99": 1223.44
+    },
+    "input": [
+      294,
+      518
+    ],
+    "source_size": [
+      1920,
+      1080
+    ],
+    "aspect_stretch": 0.991,
+    "scale": 1.0,
+    "calibrated": false,
+    "max_depth_m": 20
+  },
+  "free_space": {
+    "min_m": {
+      "p50": 5.89,
+      "p95": 6.21,
+      "p99": 6.25
+    },
+    "center_free": {
+      "p50": 0.99,
+      "p95": 1.0,
+      "p99": 1.0
+    },
+    "all_close_fraction": 0.0,
+    "params": {
+      "n_cols": 7,
+      "near_percentile": 5.0,
+      "band": [
+        0.35,
+        0.8
+      ],
+      "hfov_deg": 65.0,
+      "d_stop": 3.0,
+      "d_free": 6.0,
+      "smooth_alpha": 0.5
+    }
+  },
+  "controller": {
+    "ticks": 246,
+    "control_hz": 20.0,
+    "stale_s": 0.15,
+    "stamp_at_publish": {
+      "fresh_fraction": 0.175,
+      "age_ms": {
+        "p50": 409.44,
+        "p95": 896.99,
+        "p99": 995.83
+      },
+      "guard_stops": 14
+    },
+    "stamp_at_capture": {
+      "fresh_fraction": 0.0,
+      "age_ms": {
+        "p50": 1389.0,
+        "p95": 1959.65,
+        "p99": 2105.52
+      },
+      "guard_stops": 1
+    }
+  },
+  "events": {
+    "count": 6,
+    "with_distance": 6,
+    "distance_m": {
+      "p50": 6.26,
+      "p95": 6.51,
+      "p99": 6.53
+    },
+    "per_event_depth_ms": {
+      "p50": 478.25,
+      "p95": 549.6,
+      "p99": 554.16
+    }
+  },
+  "skips": {
+    "skipped_queue_expired": 1
+  },
+  "windows_s": {
+    "gate_window": 1.0,
+    "lost_track": 1.5,
+    "queue_expiry": 2.0,
+    "deadline": 4.0
+  },
+  "depth_thread": {
+    "lock_wait_ms": {
+      "p50": 0.0,
+      "p95": 522.94,
+      "p99": 533.95
+    },
+    "skipped_nonfinite": 0
+  },
+  "faults": {}
+}

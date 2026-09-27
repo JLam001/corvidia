@@ -161,6 +161,11 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--model", help="override detector model (.pt or .engine)")
     ap.add_argument("--no-depth", action="store_true", help="skip per-event depth estimation")
     ap.add_argument("--depth-model", help="override depth engine (e.g. the outdoor model)")
+    ap.add_argument("--freespace-hz", type=float, default=None,
+                    help="publish an obstacle free-space profile from the depth engine at this rate "
+                         "on its own thread (0 = off; needs the depth engine; 10 is the Nano target)")
+    ap.add_argument("--freespace-udp", default=None,
+                    help="also send each free-space profile as a JSON datagram to host:port")
     ap.add_argument("--events", type=Path, help="override storage root")
     ap.add_argument("--confirmer", choices=["cosmos", *sorted(STUB_ANSWERS)], default="yes",
                     help="'cosmos' uses the local llama-server; otherwise a stub answer")
@@ -238,11 +243,30 @@ def run(argv: list[str] | None = None) -> dict:
             raise SystemExit(f"depth engine {cfg.depth.model} not found (build it, or pass --no-depth)")
         depth = DepthEstimator(cfg.depth)
         extra["depth_model"] = depth.model_path
+    if args.freespace_hz is not None or args.freespace_udp is not None:
+        cfg = dataclasses.replace(cfg, freespace=dataclasses.replace(
+            cfg.freespace,
+            hz=cfg.freespace.hz if args.freespace_hz is None else args.freespace_hz,
+            udp=cfg.freespace.udp if args.freespace_udp is None else args.freespace_udp))
+    if cfg.freespace.udp and cfg.freespace.hz <= 0:
+        source.close()
+        raise SystemExit("--freespace-udp needs a rate: pass --freespace-hz (10 is the Nano target)")
+    if cfg.freespace.hz > 0 and depth is None:
+        source.close()
+        raise SystemExit("the free-space stream needs the depth engine (drop --no-depth)")
     pipe = EventPipeline(cfg, backend, clock=clock, record_extra=extra, depth=depth)
     if realtime:
         pipe.start()
     else:
         pipe.open()
+    freespace = None
+    if cfg.freespace.hz > 0:
+        from .depth_stream import FreeSpaceStream
+
+        freespace = FreeSpaceStream(
+            depth, cfg.freespace, pipe.health,
+            log_path=pipe.store.session_dir / "freespace.jsonl" if pipe.store is not None else None,
+            scale=cfg.depth.scale)
 
     det_ms: deque[float] = deque(maxlen=200_000)
     # Detector time split by whether a confirmation was in flight (GPU contention).
@@ -275,6 +299,8 @@ def run(argv: list[str] | None = None) -> dict:
 
     if not args.camera:
         detector.warmup((source.height, source.width, 3))
+    if freespace is not None:
+        freespace.start()
     started = time.monotonic()
     last_print = started
     last_series = started
@@ -309,6 +335,8 @@ def run(argv: list[str] | None = None) -> dict:
             if prev is not None and frame.info.frame_id > prev + 1:
                 dropped += frame.info.frame_id - prev - 1
             last_id[epoch] = frame.info.frame_id
+            if freespace is not None:
+                freespace.offer(frame)  # fan-out: the depth thread always sees the newest frame
             age_ms.append((t0 - frame.info.arrival_mono) * 1000)
             if frame.info.capture_quality == "argus_buffer_pts" and frame.info.capture_ts is not None:
                 capture_age_ms.append((t0 - frame.info.capture_ts) * 1000)
@@ -347,6 +375,8 @@ def run(argv: list[str] | None = None) -> dict:
     finally:
         signal.signal(signal.SIGINT, prev_handler)
         elapsed = time.monotonic() - started
+        if freespace is not None:
+            freespace.stop()
         if realtime:
             # Let an in-flight stub answer land before stopping.
             deadline = time.monotonic() + cfg.confirm.deadline_s
@@ -374,6 +404,8 @@ def run(argv: list[str] | None = None) -> dict:
                            "calibrated": cfg.depth.calibrated, "events_with_distance": len(dists),
                            "distance_m": pct(dists), "depth_ms_last": depth.last_ms}
     report["detector_ms_while_idle"] = pct(det_ms_idle)
+    if freespace is not None:
+        report["freespace"] = freespace.summary()
     if pipe.store is not None:
         (pipe.store.session_dir / "run_report.json").write_text(json.dumps(report, indent=2, default=str))
     if not args.quiet:
@@ -399,6 +431,7 @@ def _append_series(path: Path, t: float, pipe: EventPipeline, sampler: SystemSam
         "queue_depth": snap["gauges"].get("queue_depth"),
         "worker_state": snap["gauges"].get("worker_state"),
         "last_inference_s": snap["gauges"].get("last_inference_s"),
+        "freespace": {k[10:]: v for k, v in snap["gauges"].items() if k.startswith("freespace_")},
         "counters": snap["counters"],
         "faults": snap["faults"],
     }
@@ -441,6 +474,11 @@ def _stats(source, pipe, det_ms, loop_ms, age_ms, processed, dropped) -> list[st
         f"queue {snap['gauges'].get('queue_depth', 0)}  worker {snap['gauges'].get('worker_state', '-')}"
         f"  {results or 'no results yet'}",
     ]
+    g = snap["gauges"]
+    if g.get("freespace_hz") is not None or "freespace_min_m" in g:
+        lines.append(f"free space {g.get('freespace_hz') or 0:.1f} Hz  nearest {g.get('freespace_min_m', '-')} m"
+                     f"  center {g.get('freespace_center_free', '-')}  map age {g.get('freespace_age_ms', '-')} ms"
+                     f"{'  ALL CLOSE' if g.get('freespace_all_close') else ''}")
     if snap["faults"]:
         lines.append("FAULTS: " + ", ".join(snap["faults"]))
     return lines

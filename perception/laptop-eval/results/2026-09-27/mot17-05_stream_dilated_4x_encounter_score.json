@@ -1,0 +1,72 @@
+{
+  "summary": {
+    "yolo": {
+      "events": 118,
+      "false_events": 2,
+      "precision": 0.983,
+      "person_recall": 0.885,
+      "duplicate_events": 28
+    },
+    "cosmos": {
+      "events": 118,
+      "false_events": 2,
+      "precision": 0.983,
+      "person_recall": 0.885,
+      "unknown_tracks": 0,
+      "time_to_confirm_s": {
+        "p50": 1.66,
+        "p95": 4.31
+      }
+    },
+    "people": 52
+  },
+  "per_clip": {
+    "mot17-05": {
+      "people": 52,
+      "tracks": 129,
+      "yolo": {
+        "events": 118,
+        "false_events": 2,
+        "precision": 0.983,
+        "people_found": 46,
+        "missed_people": [
+          "id12",
+          "id124",
+          "id126",
+          "id23",
+          "id47",
+          "id82"
+        ],
+        "duplicate_events": 28
+      },
+      "cosmos": {
+        "events": 118,
+        "false_events": 2,
+        "precision": 0.983,
+        "people_found": 46,
+        "missed_people": [
+          "id12",
+          "id124",
+          "id126",
+          "id23",
+          "id47",
+          "id82"
+        ],
+        "unknown_tracks": 0
+      }
+    }
+  },
+  "unlabeled_tracks": [
+    "mot17-05/e0t44",
+    "mot17-05/e0t825",
+    "mot17-05/e0t840",
+    "mot17-05/e0t285",
+    "mot17-05/e0t88",
+    "mot17-05/e0t92",
+    "mot17-05/e0t64",
+    "mot17-05/e0t684",
+    "mot17-05/e0t798",
+    "mot17-05/e0t318",
+    "mot17-05/e0t186"
+  ]
+}

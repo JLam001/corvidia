@@ -182,6 +182,39 @@ deploy/soak.sh status     # latest timeseries row
 deploy/soak.sh stop       # graceful stop; writes run_report.json
 ```
 
+## Free-space stream (depth thread)
+
+The pipeline order for a moving platform: the depth engine runs on its own thread at a fixed
+rate and publishes an obstacle free-space profile, the detector thread tracks people and the
+gate stores evidence with per-event distance, and no confirmer sits in the loop. The default
+confirmer is the `yes` stub; live runs delay it by `--stub-delay` (0.8 s, to emulate Cosmos
+latency), so pass `--stub-delay 0` for the no-confirmer order. Cosmos stays available with
+`--confirmer cosmos`.
+
+```sh
+uv run corvidia-run --camera --freespace-hz 10 --stub-delay 0 --preview-port 8080
+uv run corvidia-run --camera --freespace-hz 10 --stub-delay 0 --freespace-udp 127.0.0.1:5601   # also as JSON datagrams
+```
+
+`FreeSpaceStream` (`depth_stream.py`) always works on the newest frame (a one-frame fan-out
+from the run loop), turns each metric depth map into seven sector "nearest" distances and free
+scores (`freespace.py`, ported from the autodrone framework with the same field names: `t`,
+`columns`, `center_free`, `all_close`, `hfov_deg`, `nearest_m`), smooths the nearest distances
+with an EMA, and stamps each profile at publish time. Per session it appends
+`freespace.jsonl` (one row per publish with the map's `age_at_publish_ms` and `depth_ms`),
+sets `freespace_*` health gauges (also in `timeseries.jsonl` and `/health`), and adds a
+`freespace` block to `run_report.json`. Parameters live in `[freespace]` of the config
+(`n_cols`, `near_percentile`, `band`, `hfov_deg`, `d_stop`, `d_free`, `smooth_alpha`, `udp`).
+
+Budget on the Orin Nano (measured per-call costs, 15 W): depth ~46 ms idle and YOLO ~22.5 ms,
+so depth at 10 Hz plus YOLO at 10-15 fps fits with headroom; while a Cosmos confirmation runs,
+depth takes 100-140 ms and YOLO 36.5 ms, and a consumer with a 150 ms freshness rule (the
+autodrone L3/L4 layers) would see stale free space. The engine is shared with the per-event
+distance through a lock in `DepthEstimator.depth_map`; the two take turns. Not yet done:
+calibration (`depth.scale`), the outdoor 80 m engine, an attitude-driven band (the fixed
+0.35-0.8 band is used until pitch is available), and a rate measurement on the Jetson itself.
+The laptop evaluation harness and its datasets are in [`laptop-eval/`](laptop-eval/README.md).
+
 ## Depth and best shot
 
 ```sh

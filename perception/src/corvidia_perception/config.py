@@ -119,6 +119,26 @@ class DepthConfig:
 
 
 @dataclass(frozen=True)
+class FreeSpaceConfig:
+    """Obstacle free-space profile from the depth engine, on its own thread (needs depth.enabled).
+
+    hz = 0 turns it off. The consumer's freshness rule sets the rate: the autodrone L3/L4 layers
+    reject free space older than 0.15 s, so 10 Hz is the practical target on the Orin Nano
+    (depth ~46 ms idle, 100-140 ms while Cosmos runs). Profiles are stamped at publish time; the
+    depth map's own age is reported separately (age_at_publish_ms) and is the consumer's budget.
+    """
+    hz: float = 0.0
+    n_cols: int = 7
+    near_percentile: float = 5.0        # low percentile of depth per sector = nearest thing
+    band: tuple[float, float] = (0.35, 0.8)   # rows kept (fraction of height); no attitude yet
+    hfov_deg: float = 65.0
+    d_stop: float = 3.0                 # metres: free score 0 at or below
+    d_free: float = 6.0                 # metres: free score 1 at or above
+    smooth_alpha: float = 0.5           # EMA on per-sector nearest distance (1 = no smoothing)
+    udp: str = ""                       # optional "host:port": each profile as a JSON datagram
+
+
+@dataclass(frozen=True)
 class SystemConfig:
     # Raise a memory_low fault when available RAM drops below this. The Jetson's
     # CPU and GPU share 7.5 GB; keep real headroom, not just enough to fit.
@@ -137,6 +157,7 @@ class PipelineConfig:
     system: SystemConfig = field(default_factory=SystemConfig)
     depth: DepthConfig = field(default_factory=DepthConfig)
     best_shot: BestShotConfig = field(default_factory=BestShotConfig)
+    freespace: FreeSpaceConfig = field(default_factory=FreeSpaceConfig)
 
 
 def load_config(path: str | Path) -> PipelineConfig:

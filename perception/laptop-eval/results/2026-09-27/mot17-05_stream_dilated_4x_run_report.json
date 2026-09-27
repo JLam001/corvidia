@@ -1,0 +1,17 @@
+{
+  "source": "video:mot17-05",
+  "mode": "realtime",
+  "confirmer": "stub:yes",
+  "frames_processed": 837,
+  "frames_dropped": 0,
+  "processed_fps": 3.5,
+  "detector_ms": {
+    "p50": 229.88,
+    "p95": 263.94,
+    "p99": 275.9
+  },
+  "events": 129,
+  "faults": {},
+  "mimic": true,
+  "depth_model": "/home/feder/corvidia-mimic/models/da2-metric-indoor-small-hf"
+}

@@ -1,0 +1,108 @@
+{
+  "session_id": "20260927T034509-303138b5",
+  "source": "video:dancetrack0008",
+  "mode": "every",
+  "speed": 1.0,
+  "model": "/home/feder/corvidia-mimic/models/yolo11n.pt",
+  "detector_runtime": "YoloDetector",
+  "torch_loaded": true,
+  "confirmer": "stub:yes",
+  "elapsed_s": 36.12,
+  "frames_processed": 322,
+  "frames_dropped": 0,
+  "processed_fps": 8.92,
+  "detector_ms": {
+    "p50": 59.35,
+    "p95": 125.45,
+    "p99": 136.98
+  },
+  "loop_ms": {
+    "p50": 87.31,
+    "p95": 153.18,
+    "p99": 175.27
+  },
+  "frame_age_ms": {
+    "p50": 0.03,
+    "p95": 0.05,
+    "p99": 0.08
+  },
+  "events": 26,
+  "results": {
+    "confirmed": 26
+  },
+  "max_events_per_track": 1,
+  "skips": {},
+  "confirmation_ms": {
+    "p50": 0.05,
+    "p95": 0.06,
+    "p99": 0.1
+  },
+  "queue_delay_ms": {
+    "p50": 0.0,
+    "p95": 40.0,
+    "p99": 40.0
+  },
+  "peak_rss_mb": 451.5,
+  "gpu_peak_allocated_mb": null,
+  "peak_system_used_mb": 6843.5625,
+  "min_available_mb": 8841,
+  "max_temp_c": {
+    "SEN1": 0.05,
+    "acpitz": 90.0,
+    "iwlwifi_1": 51.0,
+    "SEN4": 57.05,
+    "SEN2": 57.05,
+    "INT3400 Thermal": 20.0,
+    "x86_pkg_temp": 92.0,
+    "TCPU": 92.0,
+    "SEN3": 0.05
+  },
+  "health": {
+    "counters": {
+      "source_resets": 1,
+      "candidates_queued": 26,
+      "admission_blocked_queue_full": 15,
+      "confirmations_dispatched": 26,
+      "result_confirmed": 26,
+      "best_shots_saved": 26
+    },
+    "gauges": {
+      "storage_bytes_used": 24943488,
+      "storage_free_bytes": 873691275264,
+      "interrupted_on_startup": 0,
+      "mem_available_mb": 8966,
+      "source_age_s": 0.15926642499834998,
+      "tracks": 11,
+      "worker_state": "idle",
+      "queue_depth": 0,
+      "detector_ms": 142.0,
+      "processed": 322,
+      "dropped": 0,
+      "last_inference_s": 0.0
+    },
+    "faults": {}
+  },
+  "source_health": {
+    "counters": {
+      "frames_captured": 322
+    },
+    "gauges": {},
+    "faults": {}
+  },
+  "detector_ms_while_confirming": {
+    "p50": null,
+    "p95": null,
+    "p99": null
+  },
+  "capture_to_detect_ms": {
+    "p50": null,
+    "p95": null,
+    "p99": null
+  },
+  "power_mode": null,
+  "detector_ms_while_idle": {
+    "p50": 59.35,
+    "p95": 125.45,
+    "p99": 136.98
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "summary": {
+    "yolo": {
+      "events": 6,
+      "false_events": 0,
+      "precision": 1.0,
+      "person_recall": 0.625,
+      "duplicate_events": 1
+    },
+    "cosmos": {
+      "events": 6,
+      "false_events": 0,
+      "precision": 1.0,
+      "person_recall": 0.625,
+      "unknown_tracks": 0,
+      "time_to_confirm_s": {
+        "p50": 2.3,
+        "p95": 4.47
+      }
+    },
+    "people": 8
+  },
+  "per_clip": {
+    "dancetrack0008": {
+      "people": 8,
+      "tracks": 6,
+      "yolo": {
+        "events": 6,
+        "false_events": 0,
+        "precision": 1.0,
+        "people_found": 5,
+        "missed_people": [
+          "id1",
+          "id3",
+          "id4"
+        ],
+        "duplicate_events": 1
+      },
+      "cosmos": {
+        "events": 6,
+        "false_events": 0,
+        "precision": 1.0,
+        "people_found": 5,
+        "missed_people": [
+          "id1",
+          "id3",
+          "id4"
+        ],
+        "unknown_tracks": 0
+      }
+    }
+  },
+  "unlabeled_tracks": []
+}

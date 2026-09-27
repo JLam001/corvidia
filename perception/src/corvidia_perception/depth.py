@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -39,17 +40,23 @@ class DepthEstimator:
         meta_path = Path(self.model_path).with_suffix(".json")
         self.meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
         self.last_ms = 0.0
+        # One engine context and one set of buffers: the free-space thread and the confirmation
+        # worker (per-event distance) take turns instead of each paying for a second engine.
+        self._lock = threading.Lock()
 
     def depth_map(self, bgr: np.ndarray) -> np.ndarray:
         """Depth in meters at the engine's resolution (height, width)."""
-        t = time.perf_counter()
         small = cv2.resize(bgr, (self.width, self.height), interpolation=cv2.INTER_AREA)
         rgb = small[:, :, ::-1].astype(np.float32) * (1 / 255.0)
-        inp = self._trt.buffers[self._in]
-        inp[0] = ((rgb - MEAN) / STD).transpose(2, 0, 1)
-        self._trt.execute()
-        out = self._trt.buffers[self._out].reshape(self.height, self.width).copy()
-        self.last_ms = (time.perf_counter() - t) * 1000
+        with self._lock:
+            # last_ms is the engine's own cost (buffer write + execute + copy), not the time
+            # spent waiting for the other thread; it is set while the lock is still held.
+            t = time.perf_counter()
+            inp = self._trt.buffers[self._in]
+            inp[0] = ((rgb - MEAN) / STD).transpose(2, 0, 1)
+            self._trt.execute()
+            out = self._trt.buffers[self._out].reshape(self.height, self.width).copy()
+            self.last_ms = (time.perf_counter() - t) * 1000
         return out
 
     def person_distance(self, depth: np.ndarray, bbox: BBox, frame_w: int, frame_h: int) -> dict:

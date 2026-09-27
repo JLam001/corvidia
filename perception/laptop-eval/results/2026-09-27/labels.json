@@ -1,0 +1,906 @@
+{
+  "clips": {
+    "dancetrack0008": {
+      "notes": "auto from gt.txt: iou>=0.5, partial>=0.2; people = ids visible >=15 frames at vis>=0.5, h>=48.0px, w>=24.0px",
+      "people": [
+        "id1",
+        "id2",
+        "id3",
+        "id4",
+        "id5",
+        "id6",
+        "id7",
+        "id8"
+      ],
+      "source": "auto"
+    },
+    "mot17-05": {
+      "notes": "auto from gt.txt: iou>=0.5, partial>=0.2; people = ids visible >=15 frames at vis>=0.5, h>=48.0px, w>=24.0px",
+      "people": [
+        "id1",
+        "id100",
+        "id101",
+        "id102",
+        "id104",
+        "id12",
+        "id124",
+        "id125",
+        "id126",
+        "id128",
+        "id129",
+        "id14",
+        "id2",
+        "id20",
+        "id23",
+        "id25",
+        "id30",
+        "id33",
+        "id34",
+        "id36",
+        "id38",
+        "id42",
+        "id44",
+        "id45",
+        "id47",
+        "id48",
+        "id50",
+        "id51",
+        "id52",
+        "id53",
+        "id54",
+        "id57",
+        "id58",
+        "id59",
+        "id61",
+        "id63",
+        "id66",
+        "id67",
+        "id71",
+        "id8",
+        "id82",
+        "id83",
+        "id85",
+        "id86",
+        "id88",
+        "id89",
+        "id90",
+        "id91",
+        "id93",
+        "id97",
+        "id98",
+        "id99"
+      ],
+      "source": "auto"
+    }
+  },
+  "tracks": {
+    "dancetrack0008/e0t1": {
+      "iou": 0.934,
+      "person": "id8",
+      "source": "auto",
+      "truth": "person"
+    },
+    "dancetrack0008/e0t14": {
+      "iou": 0.685,
+      "person": "id7",
+      "source": "auto",
+      "truth": "person"
+    },
+    "dancetrack0008/e0t18": {
+      "iou": 0.688,
+      "person": "id3",
+      "source": "auto",
+      "truth": "person"
+    },
+    "dancetrack0008/e0t2": {
+      "iou": 0.888,
+      "person": "id2",
+      "source": "auto",
+      "truth": "person"
+    },
+    "dancetrack0008/e0t27": {
+      "iou": 0.92,
+      "person": "id1",
+      "source": "auto",
+      "truth": "person"
+    },
+    "dancetrack0008/e0t28": {
+      "iou": 0.829,
+      "person": "id3",
+      "source": "auto",
+      "truth": "person"
+    },
+    "dancetrack0008/e0t29": {
+      "iou": 0.864,
+      "person": "id8",
+      "source": "auto",
+      "truth": "person"
+    },
+    "dancetrack0008/e0t3": {
+      "iou": 0.925,
+      "person": "id6",
+      "source": "auto",
+      "truth": "person"
+    },
+    "dancetrack0008/e0t37": {
+      "iou": 0.653,
+      "person": "id1",
+      "source": "auto",
+      "truth": "person"
+    },
+    "dancetrack0008/e0t39": {
+      "iou": 0.749,
+      "person": "id7",
+      "source": "auto",
+      "truth": "person"
+    },
+    "dancetrack0008/e0t4": {
+      "iou": 0.846,
+      "person": "id5",
+      "source": "auto",
+      "truth": "person"
+    },
+    "dancetrack0008/e0t41": {
+      "iou": 0.895,
+      "person": "id1",
+      "source": "auto",
+      "truth": "person"
+    },
+    "dancetrack0008/e0t44": {
+      "iou": 0.957,
+      "person": "id4",
+      "source": "auto",
+      "truth": "person"
+    },
+    "dancetrack0008/e0t49": {
+      "iou": 0.635,
+      "person": "id1",
+      "source": "auto",
+      "truth": "person"
+    },
+    "dancetrack0008/e0t5": {
+      "iou": 0.911,
+      "person": "id4",
+      "source": "auto",
+      "truth": "person"
+    },
+    "dancetrack0008/e0t6": {
+      "iou": 0.751,
+      "person": "id7",
+      "source": "auto",
+      "truth": "person"
+    },
+    "dancetrack0008/e0t66": {
+      "iou": 0.575,
+      "person": "id1",
+      "source": "auto",
+      "truth": "person"
+    },
+    "dancetrack0008/e0t7": {
+      "iou": 0.836,
+      "person": "id5",
+      "source": "auto",
+      "truth": "person"
+    },
+    "dancetrack0008/e0t75": {
+      "iou": 0.733,
+      "person": "id6",
+      "source": "auto",
+      "truth": "person"
+    },
+    "dancetrack0008/e0t78": {
+      "iou": 0.628,
+      "person": "id2",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t1": {
+      "iou": 0.851,
+      "person": "id1",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t10": {
+      "iou": 0.666,
+      "person": "id5",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t106": {
+      "iou": 0.719,
+      "person": "id107",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t171": {
+      "iou": 0.64,
+      "person": "id14",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t180": {
+      "iou": 0.735,
+      "person": "id9",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t184": {
+      "iou": 0.686,
+      "person": "id107",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t2": {
+      "iou": 0.683,
+      "person": "id125",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t220": {
+      "iou": 0.844,
+      "person": "id8",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t232": {
+      "iou": 0.84,
+      "person": "id8",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t235": {
+      "iou": 0.525,
+      "person": "id13",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t280": {
+      "iou": 0.817,
+      "person": "id16",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t29": {
+      "iou": 0.552,
+      "person": "id6",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t321": {
+      "iou": 0.759,
+      "person": "id19",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t326": {
+      "iou": 0.657,
+      "person": "id21",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t327": {
+      "iou": 0.753,
+      "person": "id20",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t333": {
+      "iou": 0.839,
+      "person": "id24",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t340": {
+      "iou": 0.321,
+      "person": "id125",
+      "source": "auto",
+      "truth": "partial"
+    },
+    "mot17-05/e0t342": {
+      "iou": 0.712,
+      "person": "id27",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t360": {
+      "iou": 0.865,
+      "person": "id28",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t375": {
+      "iou": 0.937,
+      "person": "id30",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t382": {
+      "iou": 0.649,
+      "person": "id26",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t384": {
+      "iou": 0.802,
+      "person": "id25",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t387": {
+      "iou": 0.75,
+      "person": "id29",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t397": {
+      "iou": 0.798,
+      "person": "id30",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t409": {
+      "iou": 0.603,
+      "person": "id32",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t41": {
+      "iou": 0.909,
+      "person": "id3",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t411": {
+      "iou": 0.822,
+      "person": "id33",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t413": {
+      "iou": 0.767,
+      "person": "id29",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t418": {
+      "iou": 0.883,
+      "person": "id36",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t421": {
+      "iou": 0.902,
+      "person": "id123",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t422": {
+      "iou": 0.855,
+      "person": "id34",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t441": {
+      "iou": 0.881,
+      "person": "id38",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t455": {
+      "iou": 0.814,
+      "person": "id35",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t457": {
+      "iou": 0.562,
+      "person": "id41",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t467": {
+      "iou": 0.553,
+      "person": "id42",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t468": {
+      "iou": 0.814,
+      "person": "id38",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t49": {
+      "iou": 0.748,
+      "person": "id7",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t490": {
+      "iou": 0.419,
+      "person": "id42",
+      "source": "auto",
+      "truth": "partial"
+    },
+    "mot17-05/e0t493": {
+      "iou": 0.957,
+      "person": "id31",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t496": {
+      "iou": 0.727,
+      "person": "id44",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t50": {
+      "iou": 0.769,
+      "person": "id6",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t509": {
+      "iou": 0.058,
+      "person": "",
+      "source": "auto",
+      "truth": "not_person"
+    },
+    "mot17-05/e0t511": {
+      "iou": 0.502,
+      "person": "id45",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t514": {
+      "iou": 0.747,
+      "person": "id46",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t520": {
+      "iou": 0.443,
+      "person": "id44",
+      "source": "auto",
+      "truth": "partial"
+    },
+    "mot17-05/e0t526": {
+      "iou": 0.401,
+      "person": "id127",
+      "source": "auto",
+      "truth": "partial"
+    },
+    "mot17-05/e0t530": {
+      "iou": 0.642,
+      "person": "id48",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t539": {
+      "iou": 0.945,
+      "person": "id50",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t547": {
+      "iou": 0.725,
+      "person": "id48",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t656": {
+      "iou": 0.418,
+      "person": "id128",
+      "source": "auto",
+      "truth": "partial"
+    },
+    "mot17-05/e0t675": {
+      "iou": 0.6,
+      "person": "id51",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t685": {
+      "iou": 0.303,
+      "person": "id52",
+      "source": "auto",
+      "truth": "partial"
+    },
+    "mot17-05/e0t687": {
+      "iou": 0.797,
+      "person": "id54",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t692": {
+      "iou": 0.502,
+      "person": "id53",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t694": {
+      "iou": 0.318,
+      "person": "id53",
+      "source": "auto",
+      "truth": "partial"
+    },
+    "mot17-05/e0t696": {
+      "iou": 0.821,
+      "person": "id42",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t734": {
+      "iou": 0.517,
+      "person": "id54",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t735": {
+      "iou": 0.471,
+      "person": "id56",
+      "source": "auto",
+      "truth": "partial"
+    },
+    "mot17-05/e0t737": {
+      "iou": 0.733,
+      "person": "id56",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t74": {
+      "iou": 0.867,
+      "person": "id4",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t744": {
+      "iou": 0.918,
+      "person": "id57",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t745": {
+      "iou": 0.796,
+      "person": "id52",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t746": {
+      "iou": 0.6,
+      "person": "id53",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t75": {
+      "iou": 0.334,
+      "person": "id2",
+      "source": "auto",
+      "truth": "partial"
+    },
+    "mot17-05/e0t753": {
+      "iou": 0.766,
+      "person": "id58",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t756": {
+      "iou": 0.469,
+      "person": "id52",
+      "source": "auto",
+      "truth": "partial"
+    },
+    "mot17-05/e0t759": {
+      "iou": 0.949,
+      "person": "id59",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t76": {
+      "iou": 0.542,
+      "person": "id2",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t769": {
+      "iou": 0.751,
+      "person": "id54",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t784": {
+      "iou": 0.86,
+      "person": "id61",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t786": {
+      "iou": 0.713,
+      "person": "id54",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t791": {
+      "iou": 0.217,
+      "person": "id129",
+      "source": "auto",
+      "truth": "partial"
+    },
+    "mot17-05/e0t800": {
+      "iou": 0.871,
+      "person": "id63",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t809": {
+      "iou": 0.396,
+      "person": "id67",
+      "source": "auto",
+      "truth": "partial"
+    },
+    "mot17-05/e0t824": {
+      "iou": 0.872,
+      "person": "id65",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t829": {
+      "iou": 0.738,
+      "person": "id66",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t832": {
+      "iou": 0.57,
+      "person": "id109",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t838": {
+      "iou": 0.575,
+      "person": "id69",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t841": {
+      "iou": 0.599,
+      "person": "id109",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t846": {
+      "iou": 0.545,
+      "person": "id109",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t850": {
+      "iou": 0.795,
+      "person": "id70",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t853": {
+      "iou": 0.623,
+      "person": "id67",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t854": {
+      "iou": 0.504,
+      "person": "id72",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t856": {
+      "iou": 0.913,
+      "person": "id71",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t858": {
+      "iou": 0.67,
+      "person": "id73",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t864": {
+      "iou": 0.867,
+      "person": "id77",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t865": {
+      "iou": 0.842,
+      "person": "id76",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t872": {
+      "iou": 0.791,
+      "person": "id78",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t875": {
+      "iou": 0.834,
+      "person": "id80",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t876": {
+      "iou": 0.783,
+      "person": "id75",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t878": {
+      "iou": 0.791,
+      "person": "id81",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t882": {
+      "iou": 0.187,
+      "person": "",
+      "source": "auto",
+      "truth": "not_person"
+    },
+    "mot17-05/e0t893": {
+      "iou": 0.844,
+      "person": "id83",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t898": {
+      "iou": 0.788,
+      "person": "id85",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t9": {
+      "iou": 0.88,
+      "person": "id3",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t908": {
+      "iou": 0.859,
+      "person": "id86",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t910": {
+      "iou": 0.567,
+      "person": "id87",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t913": {
+      "iou": 0.936,
+      "person": "id88",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t917": {
+      "iou": 0.916,
+      "person": "id89",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t929": {
+      "iou": 0.726,
+      "person": "id96",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t930": {
+      "iou": 0.563,
+      "person": "id90",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t931": {
+      "iou": 0.72,
+      "person": "id98",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t934": {
+      "iou": 0.883,
+      "person": "id91",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t943": {
+      "iou": 0.754,
+      "person": "id93",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t944": {
+      "iou": 0.732,
+      "person": "id98",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t948": {
+      "iou": 0.89,
+      "person": "id95",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t949": {
+      "iou": 0.814,
+      "person": "id98",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t955": {
+      "iou": 0.655,
+      "person": "id84",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t956": {
+      "iou": 0.795,
+      "person": "id94",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t963": {
+      "iou": 0.74,
+      "person": "id97",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t971": {
+      "iou": 0.786,
+      "person": "id100",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t973": {
+      "iou": 0.914,
+      "person": "id101",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t978": {
+      "iou": 0.913,
+      "person": "id102",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t981": {
+      "iou": 0.868,
+      "person": "id99",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t982": {
+      "iou": 0.741,
+      "person": "id104",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t986": {
+      "iou": 0.675,
+      "person": "id71",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t99": {
+      "iou": 0.532,
+      "person": "id14",
+      "source": "auto",
+      "truth": "person"
+    },
+    "mot17-05/e0t990": {
+      "iou": 0.677,
+      "person": "id105",
+      "source": "auto",
+      "truth": "person"
+    }
+  }
+}

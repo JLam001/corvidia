@@ -1,0 +1,30 @@
+# Laptop evaluation config (no GPU, no TensorRT, no Cosmos). Sections mirror PipelineConfig.
+# The detector model path is given on the command line (--model <root>/models/yolo11n.pt).
+
+[detector]
+device = "cpu"
+imgsz = 640
+predict_conf = 0.1
+iou = 0.7
+half = false
+
+[depth]
+enabled = false      # corvidia-run has no engine here; tools/mimic_pipeline.py substitutes a CPU model
+
+[freespace]
+hz = 0               # tools/mimic_pipeline.py sets the rate (--depth-hz)
+n_cols = 7
+near_percentile = 5.0
+band = [0.35, 0.8]
+hfov_deg = 65.0
+d_stop = 3.0
+d_free = 6.0
+smooth_alpha = 0.5
+
+[storage]
+save_frame = true
+max_bytes = 21474836480   # 20 GB: laptop disk, not the Jetson card
+min_free_bytes = 1073741824
+
+[system]
+min_available_mb = 512
