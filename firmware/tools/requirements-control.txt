@@ -1,0 +1,2 @@
+pymavlink>=2.4.49,<3
+pyserial>=3.5,<4

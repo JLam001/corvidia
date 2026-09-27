@@ -1,0 +1,42 @@
+{
+  "view": "from above; camera forward",
+  "source": "user observation and position confirmation",
+  "correction_performed": true,
+  "flight_layout_verified": false,
+  "motors": [
+    {
+      "channel": 1,
+      "position": "rear-right",
+      "observed": "CW",
+      "target": "CW",
+      "reverse_required": false,
+      "previous_observed": "CCW"
+    },
+    {
+      "channel": 2,
+      "position": "front-right",
+      "observed": "CCW",
+      "target": "CCW",
+      "reverse_required": false,
+      "previous_observed": "CCW"
+    },
+    {
+      "channel": 3,
+      "position": "rear-left",
+      "observed": "CCW",
+      "target": "CCW",
+      "reverse_required": false,
+      "previous_observed": "CW"
+    },
+    {
+      "channel": 4,
+      "position": "front-left",
+      "observed": "CW",
+      "target": "CW",
+      "reverse_required": false,
+      "previous_observed": "CW"
+    }
+  ],
+  "correction_method": "not specified by user",
+  "rotation_confirmed_by_user": true
+}

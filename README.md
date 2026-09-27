@@ -15,9 +15,25 @@ The frame has a flat center for a 95 × 111 mm tray, four reinforced motor arms,
 and a braced camera mount. It prints on one 256 × 256 mm plate. Physical hardware
 fit and operating checks are documented in the guide.
 
+## Software
+
+- [Onboard mission console](perception/STAND_DEMO.md): search briefs, timed
+  collection, saved images, and the tested 5% motor-input demo profile.
+- [Perception pipeline](perception/README.md): person detection, tracking, and video replay.
+- [Event pipeline design](docs/event-pipeline.md): confirmation and evidence workflow.
+- [STM32 firmware import](firmware/IMPORT.md): BNO085 IMU polling, MAVLink telemetry,
+  command handling, and host-test results.
+- [Motor controls and corrected wiring](firmware/MOTOR_CONTROL.md): individual ESC
+  tests, the planned motor layout, and bounded movement proposals.
+- [Firmware guide](firmware/README.md): PlatformIO setup, installed v5 bench
+  firmware, and the prepared v6 startup ramp.
+
 ## Repository layout
 
 ```text
+docs/             # Software architecture and design
+perception/       # Jetson person detection/event pipeline
+firmware/         # Feather STM32F405 PlatformIO project
 hardware/
   frame/
     cad/          # Parametric CAD, build/check scripts and printer profiles
@@ -25,8 +41,8 @@ hardware/
     output/       # Final print files, CAD exports and verification records
 ```
 
-Mechanical files are grouped under `hardware/`, leaving the repository root
-available for project software. No application or firmware code has been added yet.
+Mechanical files live under `hardware/`; Jetson software and STM32 firmware
+are separate projects under `perception/` and `firmware/`.
 
 ## Get the complete files
 

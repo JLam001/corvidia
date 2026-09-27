@@ -457,14 +457,15 @@ The operator reported that none of the motors moved during this check. Command
 ACKs and zero-input telemetry therefore do not establish a physical motor test
 pass. After an ESC power cycle, the operator heard startup tones. A separate
 5-second check (`076fb7b006a9448881be0737f8616cb3`) again reported DShot147 on
-all four channels and verified zero inputs afterward. Its physical result has
-not yet been confirmed. Trace:
+all four channels and verified zero inputs afterward. The operator subsequently
+confirmed that the low-power test worked. This is operator-observed validation;
+motor RPM and supply current were not measured. Trace:
 `~/corvidia-data/integration/powered-demo-5pct-after-esc-reset.json`.
 
 The console's Begin search button was exercised directly on the Jetson using
 `find as many people in 30 seconds`. This shorter wording previously failed
 appearance validation; it now selects the same bounded collection mode. The
-current fixed mission input and host cap are both 25%.
+fixed mission input and host cap were both 25% during that historical check.
 
 - **688 tests passed**, with 7 GPU/camera tests deselected; GUI tests ran under
   Xvfb. The physical test used the existing v5 firmware.

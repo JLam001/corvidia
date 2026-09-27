@@ -1,0 +1,70 @@
+{
+  "read_only": true,
+  "seconds": 15.004271208999853,
+  "counts": {
+    "ATTITUDE": 749,
+    "ATTITUDE_QUATERNION": 749,
+    "NAMED_VALUE_INT": 358,
+    "HEARTBEAT": 17
+  },
+  "bad_fragments": 0,
+  "heartbeat": {
+    "mavpackettype": "HEARTBEAT",
+    "type": 2,
+    "autopilot": 8,
+    "base_mode": 0,
+    "custom_mode": 1146308941,
+    "system_status": 3,
+    "mavlink_version": 3
+  },
+  "named_values": {
+    "IMU_GYR": 100365,
+    "IMU_REJ": 0,
+    "DS_ALL": 1,
+    "IMU_OK": 1,
+    "ATT_AGE": 3,
+    "DS_FAULT": 0,
+    "DS_OUTPUT": 1,
+    "DS_ALLOW": 1,
+    "DS_TOKEN": 2,
+    "DS_ACTIVE": 0,
+    "DS_EXPIRE": 1,
+    "DS_FRAMES": 499888,
+    "M1_DS": 0,
+    "M2_DS": 0,
+    "M3_DS": 0,
+    "M4_DS": 0,
+    "GYR_AGE": 2,
+    "IMU_INIT": 5,
+    "IMU_ADDR": 74,
+    "I2C_MASK": 1,
+    "IMU_ATT": 100384
+  },
+  "frame_count_increase": 14047,
+  "attitude_samples": [
+    {
+      "time": 486996,
+      "roll": 0.062293291091918945,
+      "pitch": -0.0627722218632698,
+      "yaw": 0.2859330475330353
+    },
+    {
+      "time": 487017,
+      "roll": 0.062293291091918945,
+      "pitch": -0.0627722218632698,
+      "yaw": 0.2859330475330353
+    },
+    {
+      "time": 501937,
+      "roll": 0.06244882941246033,
+      "pitch": -0.06254803389310837,
+      "yaw": 0.2859351634979248
+    },
+    {
+      "time": 501958,
+      "roll": 0.06244882941246033,
+      "pitch": -0.06254803389310837,
+      "yaw": 0.2859351634979248
+    }
+  ]
+}

@@ -1,0 +1,81 @@
+{
+  "status": "dominant axes identified from operator-directed poses; precise mounting calibration not complete",
+  "calibration_applied": false,
+  "firmware_flashed": false,
+  "motor_commands_sent": false,
+  "reference_is_level": false,
+  "candidate_sensor_to_body_matrix": [
+    [
+      -1,
+      0,
+      0
+    ],
+    [
+      0,
+      1,
+      0
+    ],
+    [
+      0,
+      0,
+      -1
+    ]
+  ],
+  "absolute_attitude_alignment_verified": false,
+  "deliberate_gyro_motion_check_complete": false,
+  "candidate_requires_full_attitude_and_rate_transform": true,
+  "poses": {
+    "right_side_down": {
+      "angle_deg": 24.0428500860001,
+      "sensor_axis": [
+        -0.9777861826069527,
+        0.16746729056775564,
+        -0.12605113126353984
+      ],
+      "rotation_vector_deg": [
+        -23.508766604581282,
+        4.0263909614291675,
+        -3.0306284521400086
+      ],
+      "file": "right-down.json",
+      "reference_spread_deg": 0.02314123361731179,
+      "pose_spread_deg": 0.7010931955908124
+    },
+    "nose_up": {
+      "angle_deg": 27.038418365379467,
+      "sensor_axis": [
+        -0.06993762969440852,
+        0.9922629886922891,
+        0.10258113483566977
+      ],
+      "rotation_vector_deg": [
+        -1.8910028911604035,
+        26.82922181674391,
+        2.773631640082241
+      ],
+      "file": "nose-up-repeat.json",
+      "reference_spread_deg": 0.02314123361731179,
+      "pose_spread_deg": 1.4987798306537978
+    },
+    "yaw_right": {
+      "angle_deg": 32.55560768295041,
+      "sensor_axis": [
+        -0.09482247969680672,
+        -0.09487828059796864,
+        -0.990962567009936
+      ],
+      "rotation_vector_deg": [
+        -3.0870034485337703,
+        -3.0888200807803528,
+        -32.26138856006493
+      ],
+      "file": "yaw-right-resting.json",
+      "reference_spread_deg": 0.02314123361731179,
+      "pose_spread_deg": 1.411254369854218
+    }
+  },
+  "rejected_captures": {
+    "nose-up.json": "quaternion spread exceeded 3 degrees",
+    "yaw-right.json": "quaternion spread exceeded 3 degrees"
+  }
+}

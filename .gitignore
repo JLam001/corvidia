@@ -6,5 +6,6 @@ tmp/
 .DS_Store
 *.tmp
 .venv/
+.venv-control/
 .pytest_cache/
 events/

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Propose a bounded attitude action",
+  "description": "Proposal only. The trusted supervisor supplies sequence and authority. No direct actuation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["action", "amount", "duration_ms"],
+  "properties": {
+    "action": {"type": "string", "enum": ["level", "tilt_forward", "tilt_backward", "tilt_left", "tilt_right", "yaw_left", "yaw_right"]},
+    "amount": {"type": "number", "minimum": 0, "maximum": 30},
+    "duration_ms": {"type": "integer", "minimum": 1, "maximum": 1000}
+  },
+  "allOf": [
+    {"if": {"properties": {"action": {"const": "level"}}}, "then": {"properties": {"amount": {"const": 0}}}},
+    {"if": {"properties": {"action": {"enum": ["tilt_forward", "tilt_backward", "tilt_left", "tilt_right"]}}}, "then": {"properties": {"amount": {"maximum": 10}}}}
+  ]
+}

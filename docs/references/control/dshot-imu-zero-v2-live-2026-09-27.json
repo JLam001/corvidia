@@ -1,0 +1,39 @@
+{
+  "read_only": true,
+  "seconds": 15.002972207999846,
+  "counts": {
+    "NAMED_VALUE_INT": 354,
+    "HEARTBEAT": 20
+  },
+  "bad_fragments": 0,
+  "heartbeat": {
+    "mavpackettype": "HEARTBEAT",
+    "type": 2,
+    "autopilot": 8,
+    "base_mode": 0,
+    "custom_mode": 1146308941,
+    "system_status": 5,
+    "mavlink_version": 3
+  },
+  "named_values": {
+    "IMU_OK": 0,
+    "ATT_AGE": 28993,
+    "DS_FAULT": 0,
+    "DS_OUTPUT": 1,
+    "DS_ALLOW": 0,
+    "DS_TOKEN": 1,
+    "DS_ACTIVE": 0,
+    "DS_EXPIRE": 0,
+    "DS_FRAMES": 29358,
+    "M1_DS": 0,
+    "M2_DS": 0,
+    "M3_DS": 0,
+    "M4_DS": 0,
+    "GYR_AGE": 12589,
+    "IMU_INIT": 5,
+    "IMU_ADDR": 74,
+    "I2C_MASK": 1
+  },
+  "frame_count_increase": 14398,
+  "attitude_samples": []
+}

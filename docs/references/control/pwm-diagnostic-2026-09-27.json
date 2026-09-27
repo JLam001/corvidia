@@ -1,0 +1,94 @@
+{
+  "connected": true,
+  "port": "/dev/cu.usbmodem3267386935331",
+  "error": null,
+  "source": "1/1",
+  "attitude": null,
+  "attitude_age": null,
+  "fresh": false,
+  "heartbeat_age": 0.20925125000212574,
+  "heartbeat": {
+    "custom_mode": 1347898692,
+    "system_status": 3,
+    "armed": false,
+    "bench": false,
+    "diagnostic": true
+  },
+  "hz": 0,
+  "counts": {
+    "HEARTBEAT": 107,
+    "NAMED_VALUE_INT": 2661
+  },
+  "invalid": 0,
+  "ranges": {},
+  "named_values": {
+    "M1_MIN": {
+      "value": 969,
+      "age": 0.08930529200006276
+    },
+    "M1_MAX": {
+      "value": 1015,
+      "age": 0.06936545899952762
+    },
+    "M2_US": {
+      "value": 996,
+      "age": 0.049480624998977873
+    },
+    "M2_PERIOD": {
+      "value": 19998,
+      "age": 0.02952487499715062
+    },
+    "M2_MIN": {
+      "value": 969,
+      "age": 0.009552041999995708
+    },
+    "M2_MAX": {
+      "value": 1015,
+      "age": 0.30909424999845214
+    },
+    "M3_US": {
+      "value": 1014,
+      "age": 0.2892901669983985
+    },
+    "M3_PERIOD": {
+      "value": 20013,
+      "age": 0.2691740000009304
+    },
+    "M3_MIN": {
+      "value": 969,
+      "age": 0.24924337500124238
+    },
+    "M3_MAX": {
+      "value": 1015,
+      "age": 0.229300291997788
+    },
+    "M4_US": {
+      "value": 998,
+      "age": 0.2092143749978277
+    },
+    "M4_PERIOD": {
+      "value": 19998,
+      "age": 0.18929366699740058
+    },
+    "M4_MIN": {
+      "value": 969,
+      "age": 0.16925841700140154
+    },
+    "M4_MAX": {
+      "value": 1015,
+      "age": 0.14922987500176532
+    },
+    "M1_US": {
+      "value": 998,
+      "age": 0.1291970840029535
+    },
+    "M1_PERIOD": {
+      "value": 19998,
+      "age": 0.10928291700111004
+    }
+  },
+  "reports": {},
+  "messages": [],
+  "checked_at_utc": "2026-09-27T06:29:49.009537+00:00",
+  "measurement_limit": "GPIO pad polling using the MCU clock, with sampling uncertainty. ESC battery disconnected. Does not measure analog voltage, ESC input or motor RPM."
+}

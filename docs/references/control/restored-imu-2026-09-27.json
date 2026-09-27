@@ -1,0 +1,133 @@
+{
+  "connected": true,
+  "port": "/dev/cu.usbmodem3267386935331",
+  "error": null,
+  "source": "1/1",
+  "attitude": {
+    "roll": -178.9956393518843,
+    "pitch": -3.9585940816054466,
+    "yaw": -0.10469447361927771,
+    "gx": 0.0,
+    "gy": 0.0,
+    "gz": 0.11190581936148891,
+    "boot_ms": 22462
+  },
+  "attitude_age": 0.017491083999630064,
+  "fresh": true,
+  "heartbeat_age": 0.45408416699501686,
+  "heartbeat": {
+    "custom_mode": 0,
+    "system_status": 3,
+    "armed": false,
+    "bench": false,
+    "diagnostic": false
+  },
+  "hz": 50.0,
+  "counts": {
+    "ATTITUDE": 524,
+    "ATTITUDE_QUATERNION": 524,
+    "ATTITUDE_TARGET": 210,
+    "SERVO_OUTPUT_RAW": 105,
+    "HEARTBEAT": 11,
+    "SYS_STATUS": 11,
+    "SYSTEM_TIME": 11,
+    "EXTENDED_SYS_STATE": 21
+  },
+  "invalid": 0,
+  "ranges": {
+    "roll": [
+      -179.0376859964149,
+      -178.9886179174175
+    ],
+    "pitch": [
+      -3.979596059529589,
+      -3.9097898186647666
+    ],
+    "yaw": [
+      -0.11852608693622955,
+      -0.08989550808069638
+    ],
+    "gx": [
+      -0.6714349161689335,
+      1.342869832337867
+    ],
+    "gy": [
+      -3.1333629421216895,
+      6.826254981050823
+    ],
+    "gz": [
+      -0.33571745808446674,
+      0.44762327744595565
+    ]
+  },
+  "named_values": {},
+  "reports": {
+    "ATTITUDE_QUATERNION": {
+      "age": 0.013792166995699517,
+      "data": {
+        "mavpackettype": "ATTITUDE_QUATERNION",
+        "time_boot_ms": 22466,
+        "q1": 0.00872781127691269,
+        "q2": -0.9993648529052734,
+        "q3": 0.0006103364285081625,
+        "q4": -0.034545041620731354,
+        "rollspeed": 0.0,
+        "pitchspeed": 0.0,
+        "yawspeed": 0.001953125,
+        "repr_offset_q": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    "SERVO_OUTPUT_RAW": {
+      "age": 0.06371604199375724,
+      "data": {
+        "mavpackettype": "SERVO_OUTPUT_RAW",
+        "time_usec": 22416717,
+        "port": 0,
+        "servo1_raw": 1000,
+        "servo2_raw": 1000,
+        "servo3_raw": 1000,
+        "servo4_raw": 1000,
+        "servo5_raw": 0,
+        "servo6_raw": 0,
+        "servo7_raw": 0,
+        "servo8_raw": 0,
+        "servo9_raw": 0,
+        "servo10_raw": 0,
+        "servo11_raw": 0,
+        "servo12_raw": 0,
+        "servo13_raw": 0,
+        "servo14_raw": 0,
+        "servo15_raw": 0,
+        "servo16_raw": 0
+      }
+    },
+    "SYS_STATUS": {
+      "age": 0.4491974169941386,
+      "data": {
+        "mavpackettype": "SYS_STATUS",
+        "onboard_control_sensors_present": 2051,
+        "onboard_control_sensors_enabled": 2051,
+        "onboard_control_sensors_health": 2051,
+        "load": 400,
+        "voltage_battery": 0,
+        "current_battery": -1,
+        "battery_remaining": -1,
+        "drop_rate_comm": 0,
+        "errors_comm": 0,
+        "errors_count1": 0,
+        "errors_count2": 0,
+        "errors_count3": 0,
+        "errors_count4": 0,
+        "onboard_control_sensors_present_extended": 0,
+        "onboard_control_sensors_enabled_extended": 0,
+        "onboard_control_sensors_health_extended": 0
+      }
+    }
+  },
+  "messages": []
+}

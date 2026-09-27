@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LLM mission intent (software candidate)",
+  "description": "No power, arming, session IDs, or keepalives. Stop ends mission authority and requires a flight fallback, not motor disarm.",
+  "oneOf": [
+    {"$ref": "motion.schema.json"},
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action"],
+      "properties": {"action": {"const": "stop_mission"}}
+    }
+  ]
+}

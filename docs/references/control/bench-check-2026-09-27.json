@@ -1,0 +1,107 @@
+{
+  "connected": true,
+  "port": "/dev/cu.usbmodem3267386935331",
+  "error": null,
+  "source": "1/1",
+  "attitude": {
+    "roll": -179.76628959593683,
+    "pitch": 3.0594116302043153,
+    "yaw": -16.549828396696867,
+    "gx": -0.11190581936148891,
+    "gy": 0.22381163872297782,
+    "gz": 0.0,
+    "boot_ms": 265323
+  },
+  "attitude_age": 0.0164494169948739,
+  "fresh": true,
+  "heartbeat_age": 0.3162104590010131,
+  "heartbeat": {
+    "custom_mode": 0,
+    "system_status": 3,
+    "armed": false,
+    "bench": false
+  },
+  "hz": 50.0,
+  "counts": {
+    "ATTITUDE_QUATERNION": 7865,
+    "ATTITUDE": 7864,
+    "ATTITUDE_TARGET": 3146,
+    "SERVO_OUTPUT_RAW": 1573,
+    "EXTENDED_SYS_STATE": 314,
+    "HEARTBEAT": 157,
+    "SYS_STATUS": 157,
+    "SYSTEM_TIME": 157
+  },
+  "invalid": 0,
+  "reports": {
+    "ATTITUDE_QUATERNION": {
+      "age": 0.01146974999574013,
+      "data": {
+        "mavpackettype": "ATTITUDE_QUATERNION",
+        "time_boot_ms": 265328,
+        "q1": 0.005859550554305315,
+        "q2": -0.9892264008522034,
+        "q3": 0.14392520487308502,
+        "q4": 0.026123829185962677,
+        "rollspeed": -0.001953125,
+        "pitchspeed": 0.00390625,
+        "yawspeed": 0.0,
+        "repr_offset_q": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    "SERVO_OUTPUT_RAW": {
+      "age": 0.021528416997171007,
+      "data": {
+        "mavpackettype": "SERVO_OUTPUT_RAW",
+        "time_usec": 265318661,
+        "port": 0,
+        "servo1_raw": 1000,
+        "servo2_raw": 1000,
+        "servo3_raw": 1000,
+        "servo4_raw": 1000,
+        "servo5_raw": 0,
+        "servo6_raw": 0,
+        "servo7_raw": 0,
+        "servo8_raw": 0,
+        "servo9_raw": 0,
+        "servo10_raw": 0,
+        "servo11_raw": 0,
+        "servo12_raw": 0,
+        "servo13_raw": 0,
+        "servo14_raw": 0,
+        "servo15_raw": 0,
+        "servo16_raw": 0
+      }
+    },
+    "SYS_STATUS": {
+      "age": 0.31113420899782795,
+      "data": {
+        "mavpackettype": "SYS_STATUS",
+        "onboard_control_sensors_present": 2051,
+        "onboard_control_sensors_enabled": 2051,
+        "onboard_control_sensors_health": 2051,
+        "load": 415,
+        "voltage_battery": 0,
+        "current_battery": -1,
+        "battery_remaining": -1,
+        "drop_rate_comm": 0,
+        "errors_comm": 0,
+        "errors_count1": 0,
+        "errors_count2": 0,
+        "errors_count3": 0,
+        "errors_count4": 0,
+        "onboard_control_sensors_present_extended": 0,
+        "onboard_control_sensors_enabled_extended": 0,
+        "onboard_control_sensors_health_extended": 0
+      }
+    }
+  },
+  "messages": [],
+  "checked_at_utc": "2026-09-27T06:12:20.622237+00:00",
+  "note": "Read-only live MAVLink check. No motor command sent; installed firmware differs from imported source. Reported pulse values are not measured RPM."
+}
