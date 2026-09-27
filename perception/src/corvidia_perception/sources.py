@@ -7,6 +7,7 @@ counting through dropped frames; the gaps age the tracker.
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 from collections.abc import Callable
@@ -51,14 +52,29 @@ class VideoFileSource:
     def __init__(self, path: str | Path, *, realtime: bool = False, speed: float = 1.0,
                  loop: bool = False, health: Health | None = None) -> None:
         cv2 = _cv2()
+        path = Path(path)
         self.path = str(path)
-        self.source_id = f"video:{Path(path).name}"
-        self._cap = cv2.VideoCapture(self.path)
+        self.source_id = f"video:{path.name}"
+        if path.is_dir():  # corvidia-record clip: numbered JPEGs + frames.jsonl
+            self._cap = cv2.VideoCapture(str(path / "%06d.jpg"), cv2.CAP_IMAGES)
+            sidecar = path / "frames.jsonl"
+        else:
+            self._cap = cv2.VideoCapture(self.path)
+            sidecar = path.with_suffix(".frames.jsonl")
         if not self._cap.isOpened():
             raise FileNotFoundError(f"cannot open video {path}")
         self.fps = float(self._cap.get(cv2.CAP_PROP_FPS)) or 30.0
         self.width = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.height = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        # Clips from corvidia-record carry per-frame capture times; use them so
+        # replays keep real timing even if the recorder skipped frames.
+        self._frame_times: list[float] | None = None
+        if sidecar.exists():
+            times = [json.loads(line)["capture_ts"] for line in sidecar.read_text().splitlines()]
+            if times and all(t is not None for t in times):
+                self._frame_times = [t - times[0] for t in times]
+                if len(times) > 1:
+                    self.fps = (len(times) - 1) / (times[-1] - times[0])
         self.realtime = realtime
         self.speed = speed
         self.loop = loop
@@ -90,7 +106,10 @@ class VideoFileSource:
             ok, image = self._cap.read()
             if not ok:
                 return None
-        pts = self._index / self.fps
+        if self._frame_times is not None and self._index < len(self._frame_times):
+            pts = self._frame_times[self._index]
+        else:
+            pts = self._index / self.fps
         self._index += 1
         self._frame_id += 1
         info = FrameInfo(
@@ -102,21 +121,22 @@ class VideoFileSource:
         return Frame(info, image)
 
     def _run(self) -> None:
-        period = 1.0 / (self.fps * self.speed)
-        next_t = time.monotonic()
+        start = time.monotonic()
+        epoch = self.epoch
         while not self._stop.is_set():
             frame = self._decode()
             if frame is None:
                 self._eof = True
                 self._slot.put_end()
                 return
-            self._slot.put(frame)
-            next_t += period
-            delay = next_t - time.monotonic()
+            if frame.info.source_epoch != epoch:  # looped: restart the pacing clock
+                epoch, start = frame.info.source_epoch, time.monotonic()
+            delay = start + (frame.info.pts_s or 0.0) / self.speed - time.monotonic()
             if delay > 0:
                 self._stop.wait(delay)
-            else:
-                next_t = time.monotonic()  # decoder fell behind; do not burst
+            elif delay < -0.25:
+                start -= delay  # decoder fell behind; re-anchor instead of bursting
+            self._slot.put(frame)
 
     def read(self, timeout: float = 1.0) -> Frame | None:
         if not self.realtime:

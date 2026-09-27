@@ -47,7 +47,9 @@ class QueueConfig:
 
 @dataclass(frozen=True)
 class ConfirmConfig:
-    deadline_s: float = 3.0
+    # Counted from when the request is sent. Live soak p99 was 3.0 s (15 W), and
+    # per-event depth shares the GPU, so 3 s left no margin (2026-09-27).
+    deadline_s: float = 4.0
     # How long to wait for a timed-out request to finish or be cancelled before
     # declaring the backend unavailable.
     drain_s: float = 5.0
@@ -98,6 +100,25 @@ class DetectorConfig:
 
 
 @dataclass(frozen=True)
+class BestShotConfig:
+    enabled: bool = True
+    every_n_frames: int = 3   # score a track at most every Nth frame (CPU bound)
+    max_tracks: int = 32      # bound on held crops (one full-resolution crop each)
+    jpeg_quality: int = 95
+
+
+@dataclass(frozen=True)
+class DepthConfig:
+    enabled: bool = True
+    # Depth Anything V2 Metric Small, FP16 TensorRT. Indoor model: up to 20 m;
+    # swap in the outdoor (Virtual KITTI) engine for flights: up to 80 m.
+    model: str = "~/models/depth/da2-metric-indoor-small-294x518.engine"
+    # Multiplier from a tape-measure check; values stay "uncalibrated" until set.
+    scale: float = 1.0
+    calibrated: bool = False
+
+
+@dataclass(frozen=True)
 class SystemConfig:
     # Raise a memory_low fault when available RAM drops below this. The Jetson's
     # CPU and GPU share 7.5 GB; keep real headroom, not just enough to fit.
@@ -114,6 +135,8 @@ class PipelineConfig:
     detector: DetectorConfig = field(default_factory=DetectorConfig)
     tracker: TrackerConfig = field(default_factory=TrackerConfig)
     system: SystemConfig = field(default_factory=SystemConfig)
+    depth: DepthConfig = field(default_factory=DepthConfig)
+    best_shot: BestShotConfig = field(default_factory=BestShotConfig)
 
 
 def load_config(path: str | Path) -> PipelineConfig:

@@ -37,6 +37,7 @@ class TrackState:
     unknowns: int = 0
     cooldown_until: float = 0.0
     event_id: str | None = None
+    first_seen: float | None = None
 
 
 class CandidateGate:
@@ -82,7 +83,7 @@ class CandidateGate:
         for key, det in seen.items():
             st = self.tracks.get(key)
             if st is None:
-                st = self.tracks[key] = TrackState(key)
+                st = self.tracks[key] = TrackState(key, first_seen=now)
             st.last_seen = now
             st.lost = False
             if det.confidence >= g.min_confidence and bbox_passes_size(det.bbox, self._cfg.crop):
@@ -195,9 +196,12 @@ class CandidateGate:
             detection=det,
             crop_region=region,
             crop=crop,
-            frame=freeze(frame.image) if self._cfg.storage.save_frame else None,
+            # Depth needs the whole frame even when frames are not saved to disk.
+            frame=(freeze(frame.image)
+                   if self._cfg.storage.save_frame or self._cfg.depth.enabled else None),
             queued_mono=now,
             attempt=st.unknowns + 1,
+            track_first_seen_mono=st.first_seen,
         )
         if not self._queue.admit(candidate):  # lost a race with nothing; defensive
             self._health.incr("admission_blocked_queue_full")

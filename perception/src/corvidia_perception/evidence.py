@@ -164,6 +164,19 @@ class EvidenceStore:
             self._set_fault(f"commit_result {event_id}: {e}")
             raise StorageError(str(e)) from e
 
+    def write_best(self, event_id: str, jpeg: bytes, meta: dict) -> bool:
+        """Save the clearest crop of a track next to its event (best.jpg, best.json)."""
+        event_dir = self.session_dir / event_id
+        if not event_dir.is_dir():
+            return False
+        try:
+            self._write(event_dir / "best.jpg", jpeg)
+            self._write(event_dir / "best.json", _dumps(meta))
+        except OSError as e:
+            self._set_fault(f"write_best {event_id}: {e}")
+            return False
+        return True
+
     def append_skip(self, record: dict) -> None:
         try:
             with open(self.session_dir / "skips.jsonl", "ab") as f:

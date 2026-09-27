@@ -1,69 +1,24 @@
 """YOLO person detection on a TensorRT engine, without PyTorch or Ultralytics.
 
-Buffers are CUDA managed memory. On Jetson the CPU and GPU share DRAM, so the
-letterboxed frame is written straight into the engine's input with no copy.
+Buffers are mapped pinned memory (trt_runtime.py). On Jetson the CPU and GPU
+share DRAM, so the letterboxed frame is written straight into the engine's
+input with no copy.
 Pre/post-processing matches Ultralytics (letterbox with gray padding, class
 argmax filter, IoU NMS) so results agree with the `.pt` model.
 """
 
 from __future__ import annotations
 
-import ctypes
-import json
 import os
-import struct
 import time
 
 import cv2
 import numpy as np
 
 from .config import DetectorConfig
+from .trt_runtime import TrtEngine
 
 PERSON_CLASS = 0
-_MANAGED_ATTACH_GLOBAL = 1
-
-
-class _CudaRuntime:
-    def __init__(self) -> None:
-        self.lib = ctypes.CDLL(os.environ.get("CUDART_PATH", "/usr/local/cuda/lib64/libcudart.so"))
-
-    def check(self, err: int, what: str) -> None:
-        if err != 0:
-            self.lib.cudaGetErrorString.restype = ctypes.c_char_p
-            raise RuntimeError(f"{what} failed: {self.lib.cudaGetErrorString(err).decode()}")
-
-    def malloc_managed(self, nbytes: int) -> int:
-        ptr = ctypes.c_void_p()
-        self.check(self.lib.cudaMallocManaged(ctypes.byref(ptr), ctypes.c_size_t(nbytes),
-                                              ctypes.c_uint(_MANAGED_ATTACH_GLOBAL)), "cudaMallocManaged")
-        return ptr.value
-
-    def free(self, ptr: int) -> None:
-        self.lib.cudaFree(ctypes.c_void_p(ptr))
-
-    def stream_create(self) -> int:
-        stream = ctypes.c_void_p()
-        self.check(self.lib.cudaStreamCreate(ctypes.byref(stream)), "cudaStreamCreate")
-        return stream.value or 0
-
-    def stream_sync(self, stream: int) -> None:
-        self.check(self.lib.cudaStreamSynchronize(ctypes.c_void_p(stream)), "cudaStreamSynchronize")
-
-    def stream_destroy(self, stream: int) -> None:
-        self.lib.cudaStreamDestroy(ctypes.c_void_p(stream))
-
-
-def read_engine(path: str) -> tuple[bytes, dict]:
-    """Return the TensorRT plan and metadata, stripping an Ultralytics header if present."""
-    data = open(path, "rb").read()
-    n = struct.unpack("<I", data[:4])[0]
-    if 0 < n < 1 << 20 and len(data) > 4 + n:
-        try:
-            meta = json.loads(data[4:4 + n])
-            return data[4 + n:], meta
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            pass
-    return data, {}
 
 
 def letterbox(image: np.ndarray, size: int) -> tuple[np.ndarray, float, tuple[float, float]]:
@@ -118,35 +73,13 @@ class TrtYoloDetector:
     """Same interface as YoloDetector: detect(bgr) -> (xyxy, conf), plus last_ms."""
 
     def __init__(self, cfg: DetectorConfig) -> None:
-        import tensorrt as trt
-
         self.cfg = cfg
         self.model_path = os.path.expanduser(cfg.model)
-        plan, self.metadata = read_engine(self.model_path)
-        self._logger = trt.Logger(trt.Logger.WARNING)
-        self._runtime = trt.Runtime(self._logger)
-        self._engine = self._runtime.deserialize_cuda_engine(plan)
-        if self._engine is None:
-            raise RuntimeError(f"cannot deserialize TensorRT engine {self.model_path}")
-        self._context = self._engine.create_execution_context()
-        self._cuda = _CudaRuntime()
-        self._stream = self._cuda.stream_create()
-        self._buffers: dict[str, tuple[int, np.ndarray]] = {}
-        self.input_name = self.output_name = ""
-        for i in range(self._engine.num_io_tensors):
-            name = self._engine.get_tensor_name(i)
-            shape = tuple(self._engine.get_tensor_shape(name))
-            dtype = np.dtype(trt.nptype(self._engine.get_tensor_dtype(name)))
-            nbytes = int(np.prod(shape)) * dtype.itemsize
-            ptr = self._cuda.malloc_managed(nbytes)
-            view = np.ctypeslib.as_array((ctypes.c_byte * nbytes).from_address(ptr)).view(dtype).reshape(shape)
-            self._buffers[name] = (ptr, view)
-            self._context.set_tensor_address(name, ptr)
-            if self._engine.get_tensor_mode(name) == trt.TensorIOMode.INPUT:
-                self.input_name = name
-            else:
-                self.output_name = name
-        self.imgsz = int(self._buffers[self.input_name][1].shape[-1])
+        self._trt = TrtEngine(self.model_path)
+        self.metadata = self._trt.metadata
+        self.input_name = self._trt.input_names[0]
+        self.output_name = self._trt.output_names[0]
+        self.imgsz = int(self._trt.buffers[self.input_name].shape[-1])
         if cfg.imgsz != self.imgsz:
             raise ValueError(f"engine was built for imgsz={self.imgsz}, config says {cfg.imgsz}")
         self.last_ms = 0.0
@@ -159,13 +92,11 @@ class TrtYoloDetector:
     def detect(self, image: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         t = time.perf_counter()
         boxed, r, (pad_x, pad_y) = letterbox(image, self.imgsz)
-        inp = self._buffers[self.input_name][1]
-        # BGR HWC uint8 -> RGB CHW float in [0, 1], written into the managed buffer.
+        inp = self._trt.buffers[self.input_name]
+        # BGR HWC uint8 -> RGB CHW float in [0, 1], written into the mapped buffer.
         np.multiply(boxed[:, :, ::-1].transpose(2, 0, 1), 1 / 255.0, out=inp[0], casting="unsafe")
-        if not self._context.execute_async_v3(self._stream):
-            raise RuntimeError("TensorRT execution failed")
-        self._cuda.stream_sync(self._stream)
-        pred = self._buffers[self.output_name][1][0]
+        self._trt.execute()
+        pred = self._trt.buffers[self.output_name][0]
         boxes, scores = decode(pred, self.cfg.predict_conf, self.cfg.iou)
         if len(boxes):
             boxes[:, [0, 2]] = (boxes[:, [0, 2]] - pad_x) / r
@@ -177,15 +108,4 @@ class TrtYoloDetector:
         return boxes, scores
 
     def close(self) -> None:
-        self._cuda.stream_sync(self._stream)
-        for ptr, _ in self._buffers.values():
-            self._cuda.free(ptr)
-        self._buffers.clear()
-        self._cuda.stream_destroy(self._stream)
-
-    def __del__(self) -> None:
-        try:
-            if self._buffers:
-                self.close()
-        except Exception:  # noqa: BLE001
-            pass
+        self._trt.close()

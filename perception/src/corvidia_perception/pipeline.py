@@ -10,8 +10,9 @@ from collections.abc import Callable, Sequence
 
 from .config import PipelineConfig
 from .confirm_queue import ConfirmationQueue
+from .best_shot import BestShot, BestShotTracker
 from .confirmer import ConfirmerBackend
-from .evidence import EvidenceStore
+from .evidence import EvidenceStore, encode_jpeg
 from .gate import CandidateGate
 from .health import Health
 from .records import Completion, Detection, Frame, Skip
@@ -58,7 +59,8 @@ class EventPipeline:
                  session_id: str | None = None, store: bool = True,
                  clock: Callable[[], float] = time.monotonic,
                  wall: Callable[[], float] = time.time,
-                 free_bytes: Callable | None = None, record_extra: dict | None = None) -> None:
+                 free_bytes: Callable | None = None, record_extra: dict | None = None,
+                 depth=None) -> None:
         self.cfg = cfg
         self.clock = clock
         self.session_id = session_id or time.strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8]
@@ -72,8 +74,11 @@ class EventPipeline:
         self._skip_log: deque[Skip] = deque()
         self.completions: deque[Completion] = deque(maxlen=256)
         self.worker = ConfirmationWorker(cfg, self.queue, backend, self.store, self.health,
-                                         self._from_worker, wall, record_extra)
+                                         self._from_worker, wall, record_extra, depth, clock)
         self.gate = CandidateGate(cfg, self.queue, self.health, self.session_id, self._accepting)
+        self.best = (BestShotTracker(cfg.best_shot, cfg.crop, cfg.gate.min_confidence)
+                     if cfg.best_shot.enabled and store else None)
+        self._best_out: deque[BestShot] = deque()
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._wake = threading.Event()
@@ -109,6 +114,9 @@ class EventPipeline:
         with self._tick_lock:
             self.worker.shutdown(self.clock())
             self._write_skip_log()
+            if self.best is not None:
+                self._best_out.extend(self.best.flush())
+            self._write_best_shots()
 
     # -- detector thread ----------------------------------------------------------------
 
@@ -119,6 +127,9 @@ class EventPipeline:
         self._drain_inbox(now)
         for skip in self.gate.update(frame, detections, now):
             self._log_skip(skip)
+        if self.best is not None:
+            self.best.update(frame, list(detections), self.gate.tracks, self.session_id)
+            self._best_out.extend(self.best.finished(self.gate.tracks))
         self._wake.set()
 
     def source_lost(self) -> None:
@@ -131,6 +142,7 @@ class EventPipeline:
         with self._tick_lock:
             self.worker.tick(self.clock())
             self._write_skip_log()
+            self._write_best_shots()
 
     # -- internals ----------------------------------------------------------------------
 
@@ -157,6 +169,16 @@ class EventPipeline:
             self.health.incr("skip_log_dropped")
             return
         self._skip_log.append(skip)
+
+    def _write_best_shots(self) -> None:
+        cfg = self.cfg
+        while self._best_out:
+            shot = self._best_out.popleft()
+            if self.store is None:
+                continue
+            jpeg = encode_jpeg(shot.crop, cfg.best_shot.jpeg_quality, cfg.crop.color_order)
+            if self.store.write_best(shot.event_id, jpeg, shot.meta):
+                self.health.incr("best_shots_saved")
 
     def _write_skip_log(self) -> None:
         while self._skip_log:

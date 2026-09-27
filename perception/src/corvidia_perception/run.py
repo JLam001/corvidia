@@ -153,11 +153,14 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--sensor-id", type=int, default=0)
     ap.add_argument("--sensor-mode", type=int, choices=[0, 1], default=1,
                     help="IMX477 mode: 0 = 3840x2160@30, 1 = 1920x1080@60 (binned)")
-    ap.add_argument("--camera-size", default="1920x1080", help="camera output size WxH")
+    ap.add_argument("--camera-size", default="1280x720",
+                    help="camera output size WxH (720p leaves RAM for depth; 1920x1080 for sharper crops)")
     ap.add_argument("--camera-fps", type=int, default=30)
     ap.add_argument("--flip", type=int, default=0, help="nvvidconv flip-method (0-7)")
     ap.add_argument("--config", type=Path, help="TOML config (sections mirror PipelineConfig)")
     ap.add_argument("--model", help="override detector model (.pt or .engine)")
+    ap.add_argument("--no-depth", action="store_true", help="skip per-event depth estimation")
+    ap.add_argument("--depth-model", help="override depth engine (e.g. the outdoor model)")
     ap.add_argument("--events", type=Path, help="override storage root")
     ap.add_argument("--confirmer", choices=["cosmos", *sorted(STUB_ANSWERS)], default="yes",
                     help="'cosmos' uses the local llama-server; otherwise a stub answer")
@@ -223,7 +226,19 @@ def run(argv: list[str] | None = None) -> dict:
     clock = time.monotonic if realtime else ReplayClock()
     extra = {"detector": {"model": detector.model_path, "imgsz": cfg.detector.imgsz,
                           "tracker": "bytetrack", "tracker_config": dataclasses.asdict(cfg.tracker)}}
-    pipe = EventPipeline(cfg, backend, clock=clock, record_extra=extra)
+    if args.no_depth or args.depth_model:
+        cfg = dataclasses.replace(cfg, depth=dataclasses.replace(
+            cfg.depth, enabled=not args.no_depth, model=args.depth_model or cfg.depth.model))
+    depth = None
+    if cfg.depth.enabled:
+        from .depth import DepthEstimator
+
+        if not Path(cfg.depth.model).expanduser().exists():
+            source.close()
+            raise SystemExit(f"depth engine {cfg.depth.model} not found (build it, or pass --no-depth)")
+        depth = DepthEstimator(cfg.depth)
+        extra["depth_model"] = depth.model_path
+    pipe = EventPipeline(cfg, backend, clock=clock, record_extra=extra, depth=depth)
     if realtime:
         pipe.start()
     else:
@@ -353,6 +368,11 @@ def run(argv: list[str] | None = None) -> dict:
                             "output_size": args.camera_size, "fps": args.camera_fps,
                             "flip": args.flip}
     report["power_mode"] = power_mode()
+    if depth is not None:
+        dists = [e.get("distance_m") for e in _events(pipe) if e.get("distance_m") is not None]
+        report["depth"] = {"model": depth.model_path, "scale": cfg.depth.scale,
+                           "calibrated": cfg.depth.calibrated, "events_with_distance": len(dists),
+                           "distance_m": pct(dists), "depth_ms_last": depth.last_ms}
     report["detector_ms_while_idle"] = pct(det_ms_idle)
     if pipe.store is not None:
         (pipe.store.session_dir / "run_report.json").write_text(json.dumps(report, indent=2, default=str))
@@ -389,6 +409,12 @@ def _append_series(path: Path, t: float, pipe: EventPipeline, sampler: SystemSam
         pipe.health.incr("timeseries_write_errors")
 
 
+def _events(pipe: EventPipeline) -> list[dict]:
+    if pipe.store is None:
+        return []
+    return [json.loads(p.read_text()) for p in sorted(pipe.store.session_dir.glob("*/event.json"))]
+
+
 def _labels(pipe: EventPipeline, epoch: int | None) -> dict[int, str]:
     labels: dict[int, str] = {}
     for key, st in list(pipe.gate.tracks.items()):
@@ -397,7 +423,8 @@ def _labels(pipe: EventPipeline, epoch: int | None) -> dict[int, str]:
     for c in list(pipe.completions):
         if c.key.source_epoch == epoch and labels.get(c.key.track_id) in (
                 Phase.SUPPRESSED.value, Phase.COOLDOWN.value):
-            labels[c.key.track_id] = c.result.value
+            labels[c.key.track_id] = c.result.value + (
+                f" {c.distance_m:.1f}m" if c.distance_m is not None else "")
     return labels
 
 
@@ -426,7 +453,8 @@ def _report(args, cfg, pipe, source, detector, processed, dropped, elapsed, det_
         for p in sorted(pipe.store.session_dir.glob("*/event.json")):
             events.append(json.loads(p.read_text()))
     results = Counter(e.get("result") or e.get("status") for e in events)
-    inference = [e["inference_duration_s"] * 1000 for e in events if e.get("inference_duration_s")]
+    inference = [e.get("inference_wall_s", e.get("inference_duration_s")) * 1000 for e in events
+                 if e.get("inference_wall_s", e.get("inference_duration_s"))]
     queue_delay = [e["queue_delay_s"] * 1000 for e in events if e.get("queue_delay_s") is not None]
     tracks_per_epoch = Counter((e["source_epoch"], e["track_id"]) for e in events)
     skips = Counter()

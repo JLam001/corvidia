@@ -35,6 +35,9 @@ class _InFlight:
     future: Future[str]
     dispatched: float
     deadline: float
+    # Host time; the pipeline clock may be paused video time during accuracy replay.
+    dispatched_host: float = 0.0
+    depth: dict | None = None
 
 
 Emit = Callable[[Completion | Skip], None]
@@ -43,8 +46,12 @@ Emit = Callable[[Completion | Skip], None]
 class ConfirmationWorker:
     def __init__(self, cfg: PipelineConfig, queue: ConfirmationQueue, backend: ConfirmerBackend,
                  store: EvidenceStore | None, health: Health, emit: Emit,
-                 wall: Callable[[], float] = time.time, record_extra: dict | None = None) -> None:
+                 wall: Callable[[], float] = time.time, record_extra: dict | None = None,
+                 depth=None, clock: Callable[[], float] | None = None) -> None:
         self._cfg = cfg
+        # Pipeline clock, read again at submit so evidence writes do not eat the deadline.
+        self._clock = clock
+        self._depth = depth
         self._record_extra = record_extra or {}
         self._queue = queue
         self._backend = backend
@@ -106,7 +113,8 @@ class ConfirmationWorker:
         crop_jpeg = encode_jpeg(c.crop, quality, color, self._cfg.confirm.max_image_side)
         record = self._record(c, crop_jpeg, now)
         if self._store is not None:
-            frame_jpeg = encode_jpeg(c.frame, quality, color) if c.frame is not None else None
+            frame_jpeg = (encode_jpeg(c.frame, quality, color)
+                          if c.frame is not None and self._cfg.storage.save_frame else None)
             try:
                 self._store.commit_candidate(c.event_id, crop_jpeg, frame_jpeg, record)
             except StorageError as e:
@@ -121,7 +129,13 @@ class ConfirmationWorker:
             failed.set_exception(e)
             future = failed
         self._health.incr("confirmations_dispatched")
-        self._inflight = _InFlight(c, record, future, now, now + self._cfg.confirm.deadline_s)
+        sent = self._clock() if self._clock is not None else now
+        self._inflight = _InFlight(c, record, future, sent, sent + self._cfg.confirm.deadline_s,
+                                   time.monotonic())
+        if self._depth is not None and c.frame is not None:
+            # Runs on this thread while the confirmer works on its own thread.
+            self._inflight.depth = self._depth.measure(c.frame, c.detection.bbox)
+            self._health.set("depth_ms", self._inflight.depth.get("depth_ms"))
         self.state = WorkerState.ACTIVE
         self._check_active(now)
 
@@ -168,9 +182,13 @@ class ConfirmationWorker:
             result=result.value,
             reason=reason,
             inference_duration_s=now - f.dispatched,
+            inference_wall_s=time.monotonic() - f.dispatched_host,
+            completed_mono=now,
             committed_wall=self._wall(),
             model_io=details,
         )
+        if f.depth is not None:
+            record.update(distance_m=f.depth.get("distance_m"), depth=f.depth)
         committed = True
         if self._store is not None:
             try:
@@ -178,7 +196,8 @@ class ConfirmationWorker:
             except StorageError:
                 committed = False
         c = f.candidate
-        self._emit(Completion(c.key, c.event_id, result, reason, committed))
+        distance = f.depth.get("distance_m") if f.depth else None
+        self._emit(Completion(c.key, c.event_id, result, reason, committed, distance))
 
     def _skip(self, c: Candidate, reason: SkipReason, now: float, detail: str = "") -> None:
         self._health.incr(f"skipped_{reason.value}")
@@ -204,6 +223,7 @@ class ConfirmationWorker:
                 "host_arrival_wall": info.arrival_wall,
                 "host_arrival_mono": info.arrival_mono,
                 "video_pts_s": info.pts_s,
+                "track_first_seen_mono": c.track_first_seen_mono,
                 "queued_mono": c.queued_mono,
                 "dispatched_mono": now,
             },
@@ -230,7 +250,7 @@ class ConfirmationWorker:
             "files": {
                 "crop": "crop.jpg",
                 "crop_sha256": hashlib.sha256(crop_jpeg).hexdigest(),
-                "frame": "frame.jpg" if c.frame is not None else None,
+                "frame": "frame.jpg" if c.frame is not None and cfg.storage.save_frame else None,
             },
             "result": None,
             "reason": None,

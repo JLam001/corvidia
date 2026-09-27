@@ -185,7 +185,7 @@ def test_worker_timeout_with_real_adapter_recovers_after_cancel(harness, server)
     deadline = time.monotonic() + 2
     while not server.processing and time.monotonic() < deadline:
         time.sleep(0.01)
-    h.clock.advance(3.5)  # past the 3 s deadline
+    h.clock.advance(4.5)  # past the 4 s deadline
     h.pipe.tick()
     assert h.pipe.worker.state is WorkerState.IDLE
     (event,) = h.events()

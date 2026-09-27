@@ -26,6 +26,9 @@ detector = [
 corvidia-simulate = "corvidia_perception.simulate:main"
 corvidia-run = "corvidia_perception.run:main"
 corvidia-cosmos-eval = "corvidia_perception.cosmos_eval:main"
+corvidia-record = "corvidia_perception.record:main"
+corvidia-encounter-eval = "corvidia_perception.encounter_eval:main"
+corvidia-depth-check = "corvidia_perception.depth_check:main"
 
 [dependency-groups]
 dev = ["pytest>=8.0"]

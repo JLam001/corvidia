@@ -11,6 +11,10 @@ Implements [`docs/event-pipeline.md`](../docs/event-pipeline.md):
 - **Step 4, Jetson CSI:** GStreamer capture with Argus buffer timestamps,
   selectable sensor mode (default 1080p from the binned 1080p60 mode), power
   mode in reports, a 10 s timeseries for drift, and a detached soak runner.
+- **Depth and best shot:** per-event metric distance from Depth Anything V2 Metric
+  Small (TensorRT, uncalibrated until checked with a tape measure) and the
+  clearest full-resolution view of each tracked person (`best.jpg`).
+- **Step 5 tooling:** clip recorder and a YOLO-alone vs YOLO + Cosmos scorer.
 - The live detector runs the YOLO11n TensorRT engine directly (no PyTorch or
   Ultralytics at runtime) with a NumPy ByteTrack.
 
@@ -34,6 +38,12 @@ src/corvidia_perception/
   bytetrack.py      # ByteTrack (NumPy), matches Ultralytics' tracker output
   cosmos.py         # llama-server adapter: JSON-schema answers, cancel + idle check
   cosmos_eval.py    # corvidia-cosmos-eval: accuracy/latency on labeled crops
+  trt_runtime.py    # shared TensorRT runner (mapped pinned buffers via ctypes)
+  depth.py          # Depth Anything V2 metric distance per event
+  depth_check.py    # corvidia-depth-check: live distance readout for calibration
+  best_shot.py      # clearest crop per track -> best.jpg / best.json
+  record.py         # corvidia-record: camera clips for evaluation
+  encounter_eval.py # corvidia-encounter-eval: YOLO vs YOLO + Cosmos on clips
   sources.py        # video replay (every/realtime) and Argus CSI camera
   preview.py        # annotated MJPEG preview + /health JSON
 deploy/
@@ -104,7 +114,7 @@ uv run corvidia-run --video /usr/share/opencv4/samples/data/vtest.avi --mode eve
 # Timing replay: real-time pacing (here 4x) with frame dropping
 uv run corvidia-run --video /usr/share/opencv4/samples/data/vtest.avi --mode realtime --speed 4
 
-# Live CSI camera with Cosmos and preview at http://192.168.2.2:8080/  (Ctrl-C to stop)
+# Live CSI camera with Cosmos, depth and preview at http://192.168.2.2:8080/  (Ctrl-C to stop)
 uv run corvidia-run --camera --confirmer cosmos --preview-port 8080
 
 # Confirmer accuracy/latency on the labeled crop set, and failure-path checks
@@ -172,10 +182,43 @@ deploy/soak.sh status     # latest timeseries row
 deploy/soak.sh stop       # graceful stop; writes run_report.json
 ```
 
+## Depth and best shot
+
+```sh
+# once: export and build the engines (conversion venv has torch + transformers)
+python tools/export_depth.py ~/models/depth/da2-metric-indoor-small-hf \
+    ~/models/depth/da2-metric-indoor-small-294x518.onnx
+/usr/src/tensorrt/bin/trtexec --onnx=...onnx --saveEngine=...engine --fp16
+# calibrate: stand at taped distances and compare
+uv run corvidia-depth-check
+```
+
+Depth runs once per event, on the event's frame, on the confirmation worker
+thread while Cosmos runs (about 46 ms idle, 100-140 ms under load; 24 ms of GPU
+time). Distance is the median over the central torso region of the box. Values
+stay `"uncalibrated"` until `[depth] scale` and `calibrated = true` are set.
+
+TensorRT buffers are pinned host memory mapped into the GPU (zero-copy). CUDA
+managed memory cannot be used: the Orin reports `concurrentManagedAccess = 0`, so
+CPU access during any kernel faults, and YOLO and depth run on different threads.
+
+## Soak and step 5 results (2026-09-27)
+
+30 min soak at 15 W, 1080p, Cosmos Q4: 106 events (98 confirmed, 7 rejected, 1
+timeout), confirmation p50 2.06 s / p99 3.00 s, max 54.6 °C. Available RAM fell
+from 1.3 GB to 0.92 GB while the camera ran and recovered after it stopped; the
+growth is outside the pipeline process and not yet diagnosed.
+
+Step 5 on three recorded clips (people walking, a group, an empty ceiling view):
+YOLO alone had 0 false events, so Cosmos removed none; both found 4/4 people.
+Track fragmentation produced 32 events for 4 people. Hard negatives (screens,
+posters) were not captured, so Cosmos's benefit is still unmeasured.
+
 ## Not yet covered
 
-- Spatial/temporal deduplication of fragmented tracks (to be evaluated on footage;
-  on `vtest.avi` some people get more than one event after an ID switch).
+- Merging duplicate events from fragmented tracks (about 8 events per person on
+  close-range clips).
+- Depth calibration against a tape measure; distances are uncalibrated.
 - Argus sensor timestamps: live frames carry host arrival time only.
 - Dataset-collection retention quotas and automatic retention policies.
 - Hard negatives (screens, printed photos, mannequins, statues) in the eval set,

@@ -47,7 +47,7 @@ def annotate(state: PreviewState, max_width: int = 960) -> np.ndarray:
         image = image.copy()
     for det in state.detections:
         label = state.labels.get(det.track_id, "observing")
-        color = COLORS.get(label, (255, 255, 255))
+        color = COLORS.get(label.split()[0], (255, 255, 255))
         b = det.bbox
         p1 = (int(b.x1 * scale), int(b.y1 * scale))
         p2 = (int(b.x2 * scale), int(b.y2 * scale))

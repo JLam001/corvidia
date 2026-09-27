@@ -133,6 +133,7 @@ class Candidate:
     frame: np.ndarray | None
     queued_mono: float
     attempt: int
+    track_first_seen_mono: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +147,7 @@ class Completion:
     # False when the final record could not be written; the event stays pending on
     # disk and is marked interrupted on restart.
     committed: bool = True
+    distance_m: float | None = None
 
 
 @dataclass(frozen=True, slots=True)

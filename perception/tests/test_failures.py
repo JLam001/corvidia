@@ -17,7 +17,7 @@ def test_timeout_then_late_answer_cannot_confirm(harness):
     h = harness(backend=hold(cancel_acks=False))
     h.frames(3, person(1))
     (request,) = h.backend.requests
-    h.frames(31, person(1))  # past the 3 s deadline
+    h.frames(41, person(1))  # past the 4 s deadline
     assert h.pipe.worker.state is WorkerState.DRAINING
     assert h.backend.cancelled == [request.request_id]
     (event,) = h.events()
@@ -40,7 +40,7 @@ def test_timeout_then_late_answer_cannot_confirm(harness):
 def test_acknowledged_cancel_frees_worker_immediately(harness):
     h = harness(backend=hold(cancel_acks=True))
     h.frames(3, person(1))
-    h.frames(31, person(1))
+    h.frames(41, person(1))
     assert h.pipe.worker.state is not WorkerState.DRAINING
     assert h.pipe.health.count("confirmation_timeouts") == 1
 
@@ -48,7 +48,7 @@ def test_acknowledged_cancel_frees_worker_immediately(harness):
 def test_backend_that_never_goes_idle_becomes_unavailable_until_recovered(harness):
     h = harness(backend=hold(cancel_acks=False, reset_ok=True))
     h.frames(3, person(1), person(2, x=200))
-    h.frames(85, person(1), person(2, x=200))  # 3 s deadline + 5 s drain
+    h.frames(95, person(1), person(2, x=200))  # 4 s deadline + 5 s drain
     assert h.pipe.worker.state is WorkerState.UNAVAILABLE
     assert "backend" in h.pipe.health.snapshot()["faults"]
     reasons = {s["reason"] for s in h.skips()}

@@ -236,29 +236,33 @@ Memory: TensorRT-only pipeline ~655 MB (detector 22.9 ms p50) vs Ultralytics/PyT
 Failure paths verified against the real server: mid-generation cancel acknowledged, idle
 after ~1.0 s; 4K image → `context_overflow`; stopped server → `server_unavailable`.
 
-## Work in progress (uncommitted)
+## Recent work (2026-09-27)
 
-Spec step 4 (Jetson CSI under sustained load). Changed: `run.py`, `sources.py`,
-`tests/test_step2.py`; new: `deploy/soak.sh`.
+Step 4 is committed (`261d4fa`). The 30 min soak at 15 W (1080p, Cosmos Q4) ran with no
+thermal issue (max 54.6 °C), 106 events (98 confirmed, 7 rejected, 1 timeout), and
+confirmation p99 3.0 s. Available RAM fell to 923 MB while the camera ran and recovered
+to 1.9 GB after it stopped; the growth is outside our process (camera daemon or GPU
+allocations) and is not yet diagnosed.
 
-- **Real capture timestamps.** `GstCapture` replaces OpenCV `VideoCapture`: it pulls from a
-  GStreamer appsink and converts the buffer PTS to `time.monotonic()` seconds. Frames now
-  carry `capture_quality="argus_buffer_pts"` (≈4.5 ms before Python sees them) and fall
-  back to host arrival time. New gauge `capture_to_arrival_ms`, new report field
-  `capture_to_detect_ms`. Note: PTS is Argus delivery time, not start of exposure.
-- **Sensor modes.** `--sensor-mode 0|1` (default 1 = 1920×1080@60 binned); default output
-  size is now 1920×1080 (was 1280×720).
-- **Soak telemetry.** `--timeseries-interval` (default 10 s) appends rows to
-  `timeseries.jsonl`: fps, detector p50/p95 over the last 300 frames, available RAM, temps,
-  queue depth, worker state, counters, faults. Report now includes `camera` settings and
-  `power_mode` (from `nvpmodel -q`).
-- **Camera open errors** during pipeline construction are now camera faults, and failed
-  captures are released.
-- **`deploy/soak.sh start [minutes]|status|stop`** runs camera + TRT YOLO + Cosmos detached
-  under `nohup` (log at `~/corvidia-data/soak.log`); `stop` sends SIGINT so the report is written.
+Since then:
 
-To finish step 4: run the suite on the Jetson, run a 60 min soak, check drift in
-`timeseries.jsonl` (RAM, temps, detector latency), confirm ≥1.5 GB available at peak, then commit.
+- **Depth:** Depth Anything V2 Metric Small (indoor, up to 20 m; outdoor, up to 80 m) on
+  TensorRT FP16, run once per event on the worker thread while Cosmos works. Events get
+  `distance_m` (median over the torso region) and a `depth` block marked `uncalibrated`
+  until a tape-measure check sets `depth.scale`. `corvidia-depth-check` gives a live
+  readout. Engines: `~/models/depth/*.engine` (build with `tools/export_depth.py` + trtexec).
+- **Best shot:** the clearest view of each track (confidence x size x sharpness, halved
+  at the frame edge) is saved as `best.jpg` / `best.json` in the track's event folder.
+- **Step 5 tooling:** `corvidia-record` (threaded JPEG clips + timestamps) and
+  `corvidia-encounter-eval` (YOLO alone vs YOLO + Cosmos). Three clips recorded; on them
+  YOLO made no false events, so Cosmos showed no measurable benefit, and 4 real people
+  produced 32 events (track fragmentation). The "screen" clip only shows the ceiling.
+- **Fixes:** TensorRT buffers are mapped pinned memory, not managed memory (Orin has
+  `concurrentManagedAccess = 0`; two engines on two threads segfaulted). The confirmation
+  deadline is 4 s from when the request is sent. Camera output defaults to 720p.
+
+Open: depth calibration, duplicate-event merging, the memory drift during camera runs,
+and hard-negative clips (screens, posters).
 
 ## How to work on it
 
