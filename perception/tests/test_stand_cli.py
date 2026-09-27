@@ -471,7 +471,7 @@ def test_cli_http_server_supervisor_contract_without_hardware():
         def close(self): pass
 
         def start_all(self, percent, duration_ms):
-            assert percent == 25 and duration_ms == 60000
+            assert percent == 5 and duration_ms == 60000
             self.starts += 1
             self.state.update(start_status="accepted", zero_confirmed=False)
 

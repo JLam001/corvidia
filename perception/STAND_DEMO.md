@@ -149,14 +149,14 @@ simulated. Use `--mode telemetry --port /dev/serial/by-id/DEVICE` for the dedica
 read-only check. Hardware commissioning uses a separately launched `--mode hardware`
 service with that serial path.
 
-The onboard demo profile is fixed internally at **25% equal motor input** and a
+The onboard demo profile is fixed internally at **5% equal motor input** and a
 **60-second maximum**. Ordinary searches stop after their first matching saved
 capture. An explicit timed brief chooses a collection duration from 1–60 seconds.
 User interfaces and mission packets accept the brief and hardware readiness
 observations; they accept no raw power or duration overrides. The model cannot
 change motor input, extend a run, or authorize a new mission. Percentage is
 requested input, not measured RPM or electrical power.
-The host motor adapter also caps requested input at 25%. The installed v5
+The host motor adapter caps requested input at 7.5%. The installed v5
 firmware remains unchanged; its broader bench-test envelope does not override
 the mission profile or the host cap.
 
@@ -445,6 +445,10 @@ establishes the existing event behavior, not stand-control readiness. Validate:
   compact and normal layouts with the countdown, count, and saved image visible.
 
 ## Powered 25% console validation — 2026-09-27
+
+Historical test: the user subsequently selected 7.5% or less for the deadline
+demo after suspecting a supply trip. The current mission target is 5%, with a
+7.5% host cap. The prepared v6 ramp image was deferred and was not flashed.
 
 The console's Begin search button was exercised directly on the Jetson using
 `find as many people in 30 seconds`. This shorter wording previously failed
