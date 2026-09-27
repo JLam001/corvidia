@@ -46,6 +46,7 @@ class FreeSpaceStream:
         self._log_path = log_path
         self._latest_frame = None
         self._latest_profile: dict | None = None
+        self._latest_map: tuple[np.ndarray, int, int] | None = None
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True, name="freespace")
@@ -54,7 +55,7 @@ class FreeSpaceStream:
         self._addr = None
         if cfg.udp:
             host, port = cfg.udp.rsplit(":", 1)
-            self._addr = (host or "127.0.0.1", int(port))
+            self._addr = (socket.gethostbyname(host or "127.0.0.1"), int(port))  # resolve once, not per publish
             self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.publishes = 0
         self.skipped_nonfinite = 0
@@ -76,6 +77,12 @@ class FreeSpaceStream:
     def latest(self) -> dict | None:
         with self._lock:
             return self._latest_profile
+
+    def latest_map(self) -> tuple[np.ndarray, int, int] | None:
+        """(metric depth map with scale applied, source_epoch, frame_id) of the newest publish.
+        The array is never mutated after it is stored, so readers need no copy."""
+        with self._lock:
+            return self._latest_map
 
     def start(self) -> None:
         if self._log_path is not None:
@@ -156,6 +163,8 @@ class FreeSpaceStream:
                     continue  # never publish or smooth a map with no finite values
                 if not finite.all():
                     dmap = np.where(finite, dmap, dmap[finite].max())  # unknown = far
+                with self._lock:
+                    self._latest_map = (dmap, frame.info.source_epoch, frame.info.frame_id)
                 nearest = sector_nearest(dmap, cfg.n_cols, cfg.band, cfg.near_percentile)
                 nearest_ema = nearest if nearest_ema is None else (
                     cfg.smooth_alpha * nearest + (1 - cfg.smooth_alpha) * nearest_ema)

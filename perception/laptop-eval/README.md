@@ -87,6 +87,11 @@ $V tools/mimic_pipeline.py clips/mot17-05 --events runs/mot17-05 --mode realtime
     --speed 0.25 --depth-hz 2.5 --stale-s 0.6 --control-hz 5 --grace-s 2.0
 ```
 
+Add `--freespace-udp 127.0.0.1:5601 --tracks-udp 127.0.0.1:5602` to feed the bridge in
+[`../bridge/`](../bridge/README.md) from the laptop (verified 2026-09-27 with the framework's
+broker: 110 track messages, 27 free-space profiles, 11 capture events and healthy heartbeats
+reached the bus during a DanceTrack replay).
+
 This drives the packaged `FreeSpaceStream` with the CPU depth model and replays a virtual 20 Hz
 controller against `freespace.jsonl`: the fraction of ticks that saw free space younger than the
 consumer's rule (150 ms, from the autodrone framework's L3/L4 guards) under both stamping choices,

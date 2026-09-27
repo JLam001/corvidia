@@ -55,7 +55,7 @@ url = "https://download.pytorch.org/whl/cu130"
 explicit = true
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "bridge"]
 markers = [
     "gpu: needs CUDA and the YOLO weights (runs on the Jetson)",
     "camera: needs the CSI camera",

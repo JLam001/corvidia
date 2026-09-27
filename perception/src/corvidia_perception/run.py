@@ -166,6 +166,9 @@ def build_parser() -> argparse.ArgumentParser:
                          "on its own thread (0 = off; needs the depth engine; 10 is the Nano target)")
     ap.add_argument("--freespace-udp", default=None,
                     help="also send each free-space profile as a JSON datagram to host:port")
+    ap.add_argument("--tracks-udp", default=None,
+                    help="send per-frame person tracks (normalized boxes, id, conf, age, depth_m) as JSON "
+                         "datagrams to host:port, for an external mission loop")
     ap.add_argument("--events", type=Path, help="override storage root")
     ap.add_argument("--confirmer", choices=["cosmos", *sorted(STUB_ANSWERS)], default="yes",
                     help="'cosmos' uses the local llama-server; otherwise a stub answer")
@@ -248,6 +251,8 @@ def run(argv: list[str] | None = None) -> dict:
             cfg.freespace,
             hz=cfg.freespace.hz if args.freespace_hz is None else args.freespace_hz,
             udp=cfg.freespace.udp if args.freespace_udp is None else args.freespace_udp))
+    if args.tracks_udp is not None:
+        cfg = dataclasses.replace(cfg, tracks=dataclasses.replace(cfg.tracks, udp=args.tracks_udp))
     if cfg.freespace.udp and cfg.freespace.hz <= 0:
         source.close()
         raise SystemExit("--freespace-udp needs a rate: pass --freespace-hz (10 is the Nano target)")
@@ -267,6 +272,12 @@ def run(argv: list[str] | None = None) -> dict:
             depth, cfg.freespace, pipe.health,
             log_path=pipe.store.session_dir / "freespace.jsonl" if pipe.store is not None else None,
             scale=cfg.depth.scale)
+    tracks_pub = None
+    if cfg.tracks.udp:
+        from .tracks_stream import TracksPublisher
+
+        tracks_pub = TracksPublisher(cfg.tracks, pipe.health,
+                                     depth_map_source=freespace.latest_map if freespace is not None else None)
 
     det_ms: deque[float] = deque(maxlen=200_000)
     # Detector time split by whether a confirmation was in flight (GPU contention).
@@ -346,6 +357,8 @@ def run(argv: list[str] | None = None) -> dict:
             if isinstance(clock, ReplayClock):
                 clock.set(frame)
             pipe.on_frame(frame, dets)
+            if tracks_pub is not None:
+                tracks_pub.publish(frame, dets)
             if not realtime:
                 pipe.tick()
                 # Accuracy replay waits for each confirmation (video time is frozen,
@@ -377,6 +390,8 @@ def run(argv: list[str] | None = None) -> dict:
         elapsed = time.monotonic() - started
         if freespace is not None:
             freespace.stop()
+        if tracks_pub is not None:
+            tracks_pub.close()
         if realtime:
             # Let an in-flight stub answer land before stopping.
             deadline = time.monotonic() + cfg.confirm.deadline_s
@@ -406,6 +421,8 @@ def run(argv: list[str] | None = None) -> dict:
     report["detector_ms_while_idle"] = pct(det_ms_idle)
     if freespace is not None:
         report["freespace"] = freespace.summary()
+    if tracks_pub is not None:
+        report["tracks_stream"] = tracks_pub.summary()
     if pipe.store is not None:
         (pipe.store.session_dir / "run_report.json").write_text(json.dumps(report, indent=2, default=str))
     if not args.quiet:

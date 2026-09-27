@@ -213,7 +213,13 @@ autodrone L3/L4 layers) would see stale free space. The engine is shared with th
 distance through a lock in `DepthEstimator.depth_map`; the two take turns. Not yet done:
 calibration (`depth.scale`), the outdoor 80 m engine, an attitude-driven band (the fixed
 0.35-0.8 band is used until pitch is available), and a rate measurement on the Jetson itself.
-The laptop evaluation harness and its datasets are in [`laptop-eval/`](laptop-eval/README.md).
+Per-frame person tracks can leave the process the same way: `--tracks-udp host:port` sends
+`{"t", "frame_id", "source_epoch", "width", "height", "tracks": [{"id", "x1", "y1", "x2", "y2",
+"conf", "age", "depth_m"}]}` after every processed frame (`tracks_stream.py`; boxes normalized,
+`age` = processed frames seen, `depth_m` = torso median from the newest free-space map or -1).
+[`bridge/`](bridge/README.md) turns both streams and the evidence store into the autodrone
+mission loop's topics. The laptop evaluation harness and its datasets are in
+[`laptop-eval/`](laptop-eval/README.md).
 
 ## Depth and best shot
 

@@ -139,6 +139,13 @@ class FreeSpaceConfig:
 
 
 @dataclass(frozen=True)
+class TracksConfig:
+    """Per-frame person tracks as JSON datagrams for an external mission loop (tracks_stream.py)."""
+    udp: str = ""          # "host:port"; empty = off
+    max_hz: float = 0.0    # 0 = every processed frame
+
+
+@dataclass(frozen=True)
 class SystemConfig:
     # Raise a memory_low fault when available RAM drops below this. The Jetson's
     # CPU and GPU share 7.5 GB; keep real headroom, not just enough to fit.
@@ -158,6 +165,7 @@ class PipelineConfig:
     depth: DepthConfig = field(default_factory=DepthConfig)
     best_shot: BestShotConfig = field(default_factory=BestShotConfig)
     freespace: FreeSpaceConfig = field(default_factory=FreeSpaceConfig)
+    tracks: TracksConfig = field(default_factory=TracksConfig)
 
 
 def load_config(path: str | Path) -> PipelineConfig:

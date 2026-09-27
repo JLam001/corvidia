@@ -35,6 +35,7 @@ from corvidia_perception.config import DepthConfig, PipelineConfig, load_config
 from corvidia_perception.confirmer import StubBackend
 from corvidia_perception.depth import MEAN, STD, DepthEstimator
 from corvidia_perception.depth_stream import FreeSpaceStream
+from corvidia_perception.tracks_stream import TracksPublisher
 from corvidia_perception.detector import PersonTracker, make_detector
 from corvidia_perception.pipeline import EventPipeline
 from corvidia_perception.run import ReplayClock, pct
@@ -155,6 +156,8 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--control-hz", type=float, default=20.0)
     ap.add_argument("--grace-s", type=float, default=0.5, help="L4 guard: STOP after this long continuously stale")
     ap.add_argument("--max-frames", type=int, default=None)
+    ap.add_argument("--freespace-udp", default=None, help="host:port for free-space datagrams (bridge test)")
+    ap.add_argument("--tracks-udp", default=None, help="host:port for per-frame tracks datagrams (bridge test)")
     args = ap.parse_args(argv)
 
     cfg = load_config(args.config) if args.config else PipelineConfig()
@@ -162,7 +165,9 @@ def main(argv: list[str] | None = None) -> None:
                               detector=dataclasses.replace(cfg.detector, model=args.model),
                               depth=dataclasses.replace(cfg.depth, enabled=True, model=args.depth_model,
                                                         scale=args.depth_scale),
-                              freespace=dataclasses.replace(cfg.freespace, hz=args.depth_hz))
+                              freespace=dataclasses.replace(cfg.freespace, hz=args.depth_hz,
+                                                            udp=args.freespace_udp or cfg.freespace.udp),
+                              tracks=dataclasses.replace(cfg.tracks, udp=args.tracks_udp or cfg.tracks.udp))
     realtime = args.mode == "realtime"
     if realtime and args.speed != 1.0:
         k = 1.0 / args.speed  # replay slowed k times: every seconds-valued window must stretch k times
@@ -194,6 +199,7 @@ def main(argv: list[str] | None = None) -> None:
 
     fs_thread = FreeSpaceStream(depth, cfg.freespace, pipe.health, log_path=session_dir / "freespace.jsonl",
                                 scale=args.depth_scale)
+    tracks_pub = TracksPublisher(cfg.tracks, pipe.health, depth_map_source=fs_thread.latest_map) if cfg.tracks.udp else None
     det_ms: deque[float] = deque()
     loop_ms: deque[float] = deque()
     age_ms: deque[float] = deque()
@@ -223,6 +229,8 @@ def main(argv: list[str] | None = None) -> None:
             if isinstance(clock, ReplayClock):
                 clock.set(frame)
             pipe.on_frame(frame, dets)
+            if tracks_pub is not None:
+                tracks_pub.publish(frame, dets)
             if not realtime:
                 pipe.tick()
                 while pipe.worker.state is WorkerState.ACTIVE:
@@ -234,6 +242,8 @@ def main(argv: list[str] | None = None) -> None:
     finally:
         elapsed = time.monotonic() - started
         fs_thread.stop()
+        if tracks_pub is not None:
+            tracks_pub.close()
         if realtime:
             deadline = time.monotonic() + cfg.confirm.deadline_s
             while pipe.worker.state.value in ("active", "draining") and time.monotonic() < deadline:
