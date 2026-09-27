@@ -432,6 +432,14 @@ establishes the existing event behavior, not stand-control readiness. Validate:
   STM32 reported stale IMU readings (`IMU_OK=0`). The normal service was restored
   in observation mode with its live, read-only telemetry check intact. No
   powered motor test or firmware change was made for this feature.
+- After the operator disconnected ESC power and power-cycled the STM32 USB,
+  the IMU recovered. A second **30-second** mission with live read-only STM32
+  telemetry saved **2 sightings**, with all four JPEGs and event records
+  verified. Stop was requested after **30.018 seconds**. Actual STM32 motor
+  inputs and `DS_ACTIVE` remained zero; motor commands were simulated.
+  Mission ID: `6bf4139d994c439a804c69beab940a26`.
+- The final GUI layout passed **54 GUI tests** under Jetson Xvfb, including
+  compact and normal layouts with the countdown, count, and saved image visible.
 
 ## Integration validation — 2026-09-27 (earlier architecture)
 
