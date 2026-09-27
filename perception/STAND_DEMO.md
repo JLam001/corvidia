@@ -444,6 +444,32 @@ establishes the existing event behavior, not stand-control readiness. Validate:
 - The final GUI layout passed **54 GUI tests** under Jetson Xvfb, including
   compact and normal layouts with the countdown, count, and saved image visible.
 
+## Powered 25% console validation — 2026-09-27
+
+The console's Begin search button was exercised directly on the Jetson using
+`find as many people in 30 seconds`. This shorter wording previously failed
+appearance validation; it now selects the same bounded collection mode. The
+current fixed mission input and host cap are both 25%.
+
+- **688 tests passed**, with 7 GPU/camera tests deselected; GUI tests ran under
+  Xvfb. The physical test used the existing v5 firmware.
+- Before starting, the operator confirmed propellers removed, motors secured,
+  startup complete with all motors still, hands/cables clear, T disconnected,
+  and an accessible power disconnect. The GUI's readiness dialog was completed
+  using those confirmations, followed by one Submit mission click.
+- Mission `9dd1440948fc4765805c4a39b0d3921b` received its motor start ACK. During
+  the run, `DS_ACTIVE=1` and all four DShot input values were 547, corresponding
+  to the requested 25% input. This is not an RPM measurement.
+- The real camera, YOLO, and Cosmos saved **3 confirmed sightings**. All three
+  full frames, three crops, and event records were verified in storage.
+- The supervisor requested stop after **30.001 seconds**. A stop ACK and fresh
+  `DS_ACTIVE=0`, `DS_FAULT=0`, and all four zero motor inputs produced verified
+  completion. Trace: `~/corvidia-data/integration/powered-ui-25pct-30s.json`.
+- A subsequent console mission, `9ad089c5fc2047289a5537ae52deceb7`, also reached
+  its 30-second deadline and verified zero inputs, with no accepted captures.
+  Physical stopping remains separate from telemetry and must be observed by
+  the operator.
+
 ## Integration validation — 2026-09-27 (earlier architecture)
 
 These records describe the earlier externally leased implementation. The
