@@ -153,7 +153,7 @@ async function stop() {
 }
 async function lease() {
   const state=String(status.state||'').toLowerCase();
-  if(document.hidden||leaseBusy||!token||!status.mission_id||!(status.lease_required===true||activeStates.has(state))) return;
+  if(status.operator==='terminal'||document.hidden||leaseBusy||!token||!status.mission_id||!(status.lease_required===true||activeStates.has(state))) return;
   leaseBusy=true;
   try {await command('lease',{mission_id:status.mission_id});} catch(e) {$('connection').textContent='Operator lease lost — active mission will stop';} finally {leaseBusy=false;}
 }
@@ -164,7 +164,7 @@ async function preview() {
 $('prepare').addEventListener('click',prepare); $('start').addEventListener('click',start); $('stop').addEventListener('click',stop);
 readinessNames.forEach(name=>$(name).addEventListener('change',render));
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();stop();}});
-function backgroundStop(){if(token&&status.mission_id&&(status.lease_required===true||activeStates.has(String(status.state).toLowerCase()))) command('stop',{mission_id:status.mission_id},true).catch(()=>{});}
+function backgroundStop(){if(status.operator!=='terminal'&&token&&status.mission_id&&(status.lease_required===true||activeStates.has(String(status.state).toLowerCase()))) command('stop',{mission_id:status.mission_id},true).catch(()=>{});}
 document.addEventListener('visibilitychange',()=>{if(document.hidden) backgroundStop();});
 window.addEventListener('pagehide',backgroundStop);
 if(!token) error('Open the operator link printed by the stand service to enable controls.');

@@ -179,7 +179,36 @@ def test_ui_loss_stops_even_while_camera_progresses():
     clock.t += 1.01
     sup.event(dict(type="progress", capture_mono=clock(), processed_mono=clock(), source_epoch=0))
     sup.tick()
-    assert sup.state == "failed" and "operator page" in motor.stops[0]
+    assert sup.state == "failed" and "operator connection" in motor.stops[0]
+
+
+def test_browser_cannot_renew_terminal_mission_but_can_stop_it():
+    sup, clock, motor, _ = setup()
+    owner = "terminal_test_12345678"
+    start(sup, lease_id=owner)
+    assert sup.snapshot()["operator"] == "terminal"
+    clock.t += .4
+    with pytest.raises(ValueError, match="different operator"):
+        sup.submit(dict(action="lease", mission_id=sup.spec.mission_id))
+    with pytest.raises(ValueError, match="different operator"):
+        sup.submit(dict(action="lease", mission_id=sup.spec.mission_id, lease_id="wrong"))
+    assert sup.last_ui == 100
+    sup.submit(dict(action="lease", mission_id=sup.spec.mission_id, lease_id=owner))
+    assert sup.last_ui == clock()
+    sup.submit(dict(action="stop", mission_id=sup.spec.mission_id))
+    sup.tick()
+    assert sup.state == "cancelled" and motor.stops == ["operator stop"]
+
+
+def test_terminal_loss_expires_even_if_another_client_sends_leases():
+    sup, clock, motor, _ = setup()
+    start(sup, lease_id="terminal_test_12345678")
+    clock.t += 1.01
+    sup.event(dict(type="progress", capture_mono=clock(), processed_mono=clock(), source_epoch=0))
+    with pytest.raises(ValueError):
+        sup.submit(dict(action="lease", mission_id=sup.spec.mission_id))
+    sup.tick()
+    assert sup.state == "failed" and "operator connection" in motor.stops[0]
 
 
 def test_stale_camera_stops_despite_ui_lease():

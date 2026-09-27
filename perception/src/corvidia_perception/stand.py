@@ -123,6 +123,7 @@ class StandSupervisor:
         self.source_epoch = None
         self.last_capture = self.last_processed = None
         self.last_ui = None
+        self.lease_id = None
         self.started_mono = self.deadline = self.stopping_mono = None
         self.stage = None
         self.stage_started = None
@@ -151,6 +152,8 @@ class StandSupervisor:
                 if message.get("mission_id") != current or current is None:
                     raise ValueError("Mission does not match current session")
                 if action == "lease":
+                    if message.get("lease_id") != self.lease_id:
+                        raise ValueError("This mission belongs to a different operator client")
                     self.last_ui = self.clock()
                 else:
                     self.stop_requested.set()
@@ -204,6 +207,7 @@ class StandSupervisor:
             self.motor.start_background()
         self.spec = MissionSpec.create(message.get("appearance"), message.get("percent", 5),
                                        message.get("duration_ms", 10_000))
+        self.lease_id = None
         self.state, self.error, self.guidance = "prepared", None, "hold"
         self.started_mono = self.deadline = self.stopping_mono = None
         self.stage = self.stage_started = self.pending_terminal = None
@@ -230,6 +234,7 @@ class StandSupervisor:
         if self.journal and self.journal.fault():
             raise ValueError(self.journal.fault())
         self.started_mono, self.deadline, self.last_ui = now, now + self.spec.duration_ms / 1000, now
+        self.lease_id = message.get("lease_id")
         self.state, self.error = "starting", None
         self.motor.refresh_lease()
         self.motor.start_all(self.spec.percent, self.spec.duration_ms)
@@ -274,7 +279,7 @@ class StandSupervisor:
         if now >= self.deadline:
             return "mission time limit", "timed_out"
         if self.last_ui is None or now - self.last_ui > 1:
-            return "operator page disconnected or inactive", "failed"
+            return "operator connection lost or inactive", "failed"
         if not self._fresh(now):
             return "camera or detector progress stale", "failed"
         if motor.get("error") or motor.get("fault") or motor.get("start_status") == "failed":
@@ -419,6 +424,7 @@ class StandSupervisor:
                                if isinstance(received, (int, float)) and math.isfinite(received)
                                else None)
         status = {"mode": self.mode, "state": self.state, **settings,
+                  "operator": "terminal" if self.lease_id is not None else "dashboard",
                   "error": self.error, "guidance": self.guidance,
                   "lease_required": self.state in ACTIVE,
                   "remaining_ms": max(0, int((self.deadline - now) * 1000)) if self.deadline else None,
@@ -487,6 +493,7 @@ def main(argv=None):
     from .stand_motor import MotorSession, SimulatedMotorSession
     from .stand_perception import perception_worker
     from .stand_web import StandWebServer
+    from .stand_session import default_session_path, write_session, remove_session
 
     ctx = mp.get_context("spawn")
     commands, events, previews = ctx.Queue(16), ctx.Queue(128), ctx.Queue(1)
@@ -506,12 +513,15 @@ def main(argv=None):
     done = threading.Event()
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, lambda *_: done.set())
-    process.start()
-    print(f"Stand demo mode={args.mode}; dashboard http://127.0.0.1:{web.port}/?token={web.token}", flush=True)
+    session_path = default_session_path(web.port)
     started = time.monotonic()
     sampled = 0
     process_exit_seen = False
     try:
+        write_session(session_path, url=f"http://127.0.0.1:{web.port}", token=web.token, pid=os.getpid())
+        process.start()
+        print(f"Stand demo mode={args.mode}; terminal session {session_path}", flush=True)
+        print(f"Dashboard http://127.0.0.1:{web.port}/?token={web.token}", flush=True)
         while not done.is_set():
             tick_start = time.monotonic()
             for _ in range(64):
@@ -552,10 +562,12 @@ def main(argv=None):
             commands.put_nowait({"type": "shutdown"})
         except queue.Full:
             pass
-        process.join(2)
-        if process.is_alive():
-            process.terminate()
+        if process.pid is not None:
             process.join(2)
+            if process.is_alive():
+                process.terminate()
+                process.join(2)
+        remove_session(session_path, web.token)
         web.close()
         journal.close()
 

@@ -39,13 +39,20 @@ def _command(action: str, body: dict) -> dict:
                     duration_ms=duration)
     if action not in ("start", "stop", "lease"):
         raise ValueError("Unknown command")
-    allowed = {"mission_id", "readiness"} if action == "start" else {"mission_id"}
+    allowed = ({"mission_id", "readiness", "lease_id"} if action == "start" else
+               {"mission_id", "lease_id"} if action == "lease" else {"mission_id"})
     if set(body) - allowed:
         raise ValueError("Unexpected command field")
     mission_id = body.get("mission_id")
     if not isinstance(mission_id, str) or not 1 <= len(mission_id) <= 128:
         raise ValueError("A current mission ID is required")
     event = dict(action=action, mission_id=mission_id)
+    if "lease_id" in body:
+        lease_id = body["lease_id"]
+        if (not isinstance(lease_id, str) or not 16 <= len(lease_id) <= 96
+                or not all(c.isascii() and (c.isalnum() or c in "_-") for c in lease_id)):
+            raise ValueError("A valid operator lease ID is required")
+        event["lease_id"] = lease_id
     if action == "start":
         readiness = body.get("readiness", {})
         if readiness == {}:

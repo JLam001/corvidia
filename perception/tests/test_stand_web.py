@@ -137,6 +137,16 @@ def test_stop_and_lease_preserve_mission_identity(web):
         assert request(web, "POST", f"/api/{action}", {"mission_id": ""})[0] == 400
 
 
+def test_terminal_lease_id_passes_through_start_and_renewal(web):
+    owner = "terminal_test_12345678"
+    for action in ("start", "lease"):
+        assert request(web, "POST", f"/api/{action}", {"mission_id": "m1", "lease_id": owner})[0] == 202
+        assert web[1][-1]["lease_id"] == owner
+        for bad in (None, 2, "short", "x" * 97, "a" * 16 + "\n"):
+            assert request(web, "POST", f"/api/{action}", {"mission_id": "m1", "lease_id": bad})[0] == 400
+    assert request(web, "POST", "/api/stop", {"mission_id": "m1", "lease_id": owner})[0] == 400
+
+
 def test_callbacks_reject_without_disclosing_internal_errors():
     def reject(_event):
         raise ValueError("Mission is no longer prepared")

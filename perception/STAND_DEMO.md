@@ -130,6 +130,58 @@ the lease. An ended mission does not automatically restart when the page or
 hardware reconnects. If zero-input stop verification fails, new missions are
 blocked until the operator recovers the physical setup and restarts the service.
 
+## Terminal operation
+
+The terminal client works without the browser. The preferred Mac or Linux
+workflow runs the client **locally**, with its operator lease passing through
+the Ethernet connection. Local Python 3.12 or newer and the verified
+`corvidia-jetson` SSH alias are required. From the repository root:
+
+```sh
+./perception/deploy/stand-terminal.sh status
+./perception/deploy/stand-terminal.sh run "person wearing a red shirt" --percent 5 --seconds 10
+./perception/deploy/stand-terminal.sh stop
+```
+
+For `run`, the wrapper creates its own loopback-only port-8080 SSH tunnel. Close
+any known existing port-8080 tunnel first; a new run refuses to reuse an unknown
+listener. It reads the Jetson service's private
+`~/.local/state/corvidia/stand-8080.json` into a temporary mode-600 local file.
+The operator token stays out of command arguments and printed output. On exit,
+the wrapper removes that file and closes only its own SSH connection.
+
+`status` and `stop` use one-shot SSH commands on the Jetson and renew no lease.
+They work from a second terminal while `run` owns the local tunnel. Those fixed
+commands use the current deployment at `~/corvidia/perception`; `status --json`
+prints the status as JSON.
+
+`run` prepares and displays the description and limits for review. Follow the
+terminal's confirmation prompts, then its manual turn/HOLD guidance. Ctrl+C
+requests stop; the separate `stop` command also works. Signal cleanup keeps the
+tunnel open for up to five seconds while the client verifies zero inputs, then
+closes it. The terminal owns its lease through a unique `lease_id` and
+`operator="terminal"`: an open dashboard cannot renew that lease or stop it
+merely by being hidden. The dashboard's explicit **Stop** remains available.
+An Ethernet or terminal failure stops lease renewal; the supervisor expires
+the run after one second. A reconnect never restarts a mission.
+
+The terminal uses the same **20% input / 60-second maximum** as the dashboard.
+For an already commissioned hardware-mode service, add `--hardware` to `run`
+and complete its readiness confirmations. That flag does not change service
+mode. Observation mode retains simulated motor output.
+
+Direct operation in a terminal on the Jetson is also supported, from its
+deployment's `perception` directory:
+
+```sh
+.venv/bin/python -m corvidia_perception.stand_cli --session ~/.local/state/corvidia/stand-8080.json status
+.venv/bin/python -m corvidia_perception.stand_cli --session ~/.local/state/corvidia/stand-8080.json run "person wearing a red shirt" --percent 5 --seconds 10
+```
+
+Use the local wrapper when operating from the Mac. A client launched remotely
+over SSH may keep renewing its lease on the Jetson until SSH notices a lost
+connection; the local wrapper's lease must cross Ethernet on every renewal.
+
 ## Completion and evidence
 
 A mission succeeds only when the target's confirmation and image record are
@@ -225,3 +277,63 @@ access to the local dashboard.
 Runtime audit files and images are under `~/corvidia-data/integration`,
 `~/corvidia-data/stand-missions`, and `~/corvidia-data/stand-events` on the Jetson.
 They are not committed to Git.
+
+## Status of the upstream autodrone bridge
+
+Commit `f0cf748` is included in this checkout and on the Jetson. Its
+[`corvidia_bridge.py`](bridge/corvidia_bridge.py) publishes perception data to
+the separate `autodrone` framework: tracks, free space, health, captures, and
+optional preview frames. It has no serial connection or motor command handling.
+The terminal client controls the existing stand supervisor through its operator
+API. That supervisor remains the single owner of the STM32 connection.
+
+The external `autodrone` project is not installed on this Jetson, and its flight
+controller command contract has not been inspected. Before enabling that path:
+
+- Obtain the framework repository and check its FC adapter against the installed
+  v5 firmware. The firmware accepts bounded bench commands; flight setpoints and
+  mission commands remain disabled. MAVLink transport alone does not establish
+  command compatibility.
+- Share one camera/model process. The stand worker currently sends internal
+  events, while the upstream bridge expects UDP ports 5601/5602, `/health`, and
+  an optional `/stream`. The stand API has `/api/status` and `/frame.jpg`, and
+  stand depth inference is disabled. Do not launch both camera owners together.
+- Preserve mission ID and requested appearance when forwarding captures. The
+  bridge's current capture message omits those fields and uses placeholder
+  pose and probability values. It can wait five seconds for a best-shot image;
+  the stand's immediate stop uses the committed current-mission event directly.
+- Use the real Cosmos confirmer for a matching-person demonstration. The bridge
+  README's example defaults to the stub confirmer and produces unverified
+  captures.
+
+Keep one component responsible for motor authority, fixed deadlines, operator
+leases, and stop verification when integrating the external mission framework.
+
+### Link to the tested STM32 firmware
+
+The stand already links mission decisions to the installed v5 interface through
+[`MotorSession`](src/corvidia_perception/stand_motor.py). An explicit operator
+start establishes one bounded run; the adapter obtains the firmware token,
+sets that run's envelope, and sends the existing all-four MAVLink bench command.
+A committed matching capture, stop request, fault, or deadline ends that run.
+The MCU's own watchdogs remain responsible for enforcing output limits.
+
+The terminal, dashboard, and a future external mission adapter must use this
+single supervisor. The model may supply target judgments and manual turn cues;
+it does not select raw motor output, extend an active run, or authorize a new
+start. This stand path requires no STM32 firmware update. Autonomous flight
+control remains outside the tested bench interface.
+
+### Terminal validation — 2026-09-27
+
+- **262 tests passed; 7 GPU/camera tests excluded** on the Jetson, including
+  terminal-to-HTTP-to-supervisor tests with simulated motors.
+- The Mac wrapper reached the live Jetson service through its private SSH
+  tunnel. Separate status commands worked while that tunnel was occupied.
+- Live observation runs verified a two-second client limit, a ten-second
+  mission deadline, and Ctrl+C during an active search. Stop verification
+  succeeded with simulated motors, and each wrapper removed its own tunnel.
+- The real STM32 stayed in read-only mode: `DS_TOKEN=1`, `DS_ACTIVE=0`, and all
+  four reported motor inputs were zero. Its v5 firmware was not modified.
+- No matching-person capture was completed in these terminal runs. That live
+  rehearsal and separate powered stand commissioning remain pending.
