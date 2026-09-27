@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=Corvidia console (Xorg)
+Comment=Camera and mission console with a lightweight window manager
+Exec="@CORVIDIA_PUBLIC_SESSION_WRAPPER@"
+TryExec=@CORVIDIA_PUBLIC_SESSION_WRAPPER@
+Type=Application

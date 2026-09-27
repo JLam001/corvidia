@@ -69,6 +69,15 @@ def test_mission_does_not_accept_user_motor_settings(web):
     assert web[1] == [dict(action="mission", appearance="red shirt", readiness={})]
 
 
+@pytest.mark.parametrize("appearance", ["person in a blue polo and glasses", "red shirt with stripes",
+                                      "person carrying a bag"])
+def test_unsupported_traits_return_actionable_400_without_queueing(web, appearance):
+    code, _, body = request(web, "POST", "/api/mission", {"appearance": appearance})
+    assert code == 400 and web[1] == []
+    error = json.loads(body)["error"]
+    assert "polo" in error.lower() or "shirt" in error.lower()
+
+
 @pytest.mark.parametrize("changes", [
     {"percent": True}, {"percent": 0}, {"percent": 20.01}, {"percent": float("nan")},
     {"duration_ms": 60001}, {"duration_ms": 1000.0}, {"duration_ms": True},

@@ -19,6 +19,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from .appearance import compile_appearance
+
 
 DEFAULT_SESSION = Path("~/.local/state/corvidia/stand-8080.json").expanduser()
 DEFAULT_URL = "http://127.0.0.1:8080"
@@ -162,12 +164,11 @@ class ApiClient:
 
 
 def settings(appearance):
-    if not isinstance(appearance, str) or not 1 <= len(appearance.strip()) <= 240:
-        raise ClientError("Describe the person's visible appearance in 1–240 characters")
-    appearance = appearance.strip()
-    if any(ord(c) < 32 or ord(c) == 127 for c in appearance):
-        raise ClientError("Use a single-line description without control characters")
-    return dict(appearance=appearance)
+    try:
+        compile_appearance(appearance)
+    except ValueError as exc:
+        raise ClientError(str(exc)) from None
+    return dict(appearance=appearance.strip())
 
 
 class TerminalMission:

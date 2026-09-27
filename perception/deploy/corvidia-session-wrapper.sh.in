@@ -1,0 +1,4 @@
+#!/bin/sh
+# Root-owned entry point visible to GDM before user login. The private checkout
+# is accessed only when GDM runs this wrapper as the authenticated user.
+exec "@CORVIDIA_PRIVATE_SESSION_LAUNCHER@" "$@"

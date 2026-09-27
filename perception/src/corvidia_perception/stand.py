@@ -19,6 +19,8 @@ import threading
 import time
 import uuid
 
+from .appearance import AppearanceRequirements, compile_appearance
+
 
 ACTIVE = {"starting", "searching", "confirming", "saving"}
 TERMINAL = {"complete", "failed", "timed_out", "cancelled"}
@@ -32,22 +34,20 @@ READINESS = {"guarded_stand", "hands_clear", "power_disconnect_accessible", "mot
 class MissionSpec:
     mission_id: str
     appearance: str
+    requirements: AppearanceRequirements
     percent: float = 5.0
     duration_ms: int = MISSION_DURATION_MS
 
     @classmethod
     def create(cls, appearance, percent=MISSION_PERCENT, duration_ms=MISSION_DURATION_MS):
-        if not isinstance(appearance, str) or not 1 <= len(appearance.strip()) <= 240:
-            raise ValueError("Describe visible clothing/accessories in 1–240 characters")
-        if any(ord(c) < 32 or ord(c) == 127 for c in appearance.strip()):
-            raise ValueError("Use a single-line appearance description without control characters")
+        requirements = compile_appearance(appearance)
         if isinstance(percent, bool) or not isinstance(percent, (int, float)) or not math.isfinite(percent):
             raise ValueError("Motor input must be a finite number")
         if not 0 < percent <= 20:
             raise ValueError("Stand input must be greater than zero and at most 20%")
         if type(duration_ms) is not int or not 1000 <= duration_ms <= 60_000:
             raise ValueError("Duration must be 1,000–60,000 integer milliseconds")
-        return cls(uuid.uuid4().hex, appearance.strip(), float(percent), duration_ms)
+        return cls(uuid.uuid4().hex, appearance.strip(), requirements, float(percent), duration_ms)
 
     @property
     def description_sha256(self):
@@ -391,7 +391,9 @@ class StandSupervisor:
                     self._stop(*failure)
                 else:
                     self._stop("matching person captured", "complete")
-            elif event.get("result") == "rejected" or event.get("reason") == "ambiguous":
+            elif event.get("result") == "rejected" or (
+                    event.get("result") == "unknown" and event.get("reason") in {
+                        "ambiguous", "subject_unknown", "upper_color_unknown", "upper_garment_unknown"}):
                 if failure:
                     self._stop(*failure)
                 else:

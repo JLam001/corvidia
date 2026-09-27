@@ -12,6 +12,8 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
+from .appearance import compile_appearance
+
 
 _MAX_BODY = 4096
 _READINESS = ("guarded_stand", "hands_clear", "power_disconnect_accessible",
@@ -24,10 +26,7 @@ def _command(action: str, body: dict) -> dict:
         if set(body) - {"appearance", "readiness"}:
             raise ValueError("Mission input cannot set motor power or timing")
         appearance = body.get("appearance", "")
-        if not isinstance(appearance, str) or not 1 <= len(appearance.strip()) <= 240:
-            raise ValueError("Describe the person's visible appearance in 1–240 characters")
-        if any(ord(c) < 32 or ord(c) == 127 for c in appearance.strip()):
-            raise ValueError("Use a single-line appearance description without control characters")
+        compile_appearance(appearance)
         readiness = body.get("readiness", {})
         if not isinstance(readiness, dict) or (readiness and
                 (set(readiness) != set(_READINESS) or any(v is not True for v in readiness.values()))):

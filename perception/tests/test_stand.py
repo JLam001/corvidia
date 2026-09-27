@@ -88,6 +88,24 @@ def test_invalid_description_is_rejected_before_motor_authority():
     assert not motor.starts
 
 
+@pytest.mark.parametrize("appearance", ["blue polo and glasses", "red shirt and blue pants",
+                                      "blue striped polo", "person holding a red bag"])
+def test_unsupported_traits_are_rejected_before_queue_or_motor_start(appearance):
+    sup, _, motor, _ = setup("hardware")
+    with pytest.raises(ValueError):
+        sup.submit(dict(action="mission", appearance=appearance))
+    assert sup.commands.empty() and sup._pending_mission is None and not motor.starts
+
+
+def test_compiled_requirements_are_preserved_in_status_and_worker_evidence():
+    sup, _, _, commands = setup()
+    start(sup)
+    required = {"subject": "human", "upper_color": "red", "upper_garment": "shirt"}
+    assert sup.snapshot()["requirements"] == required
+    command = commands.get_nowait()
+    assert command["record_extra"]["mission"]["requirements"] == required
+
+
 def test_committed_matching_capture_stops_early():
     sup, clock, motor, commands = setup()
     start(sup)
@@ -158,7 +176,8 @@ def test_wrong_mission_and_duplicate_start_do_not_restart_or_extend():
 
 @pytest.mark.parametrize("result,reason,committed", [("confirmed", "answer_yes", False),
                                                      ("unknown", "timeout", True),
-                                                     ("unknown", "malformed_output", True)])
+                                                     ("unknown", "malformed_output", True),
+                                                     ("unknown", "unsupported_observations", True)])
 def test_failed_save_or_confirmation_stops(result, reason, committed):
     sup, clock, motor, _ = setup()
     start(sup)
@@ -168,7 +187,12 @@ def test_failed_save_or_confirmation_stops(result, reason, committed):
     assert sup.state == "failed" and motor.stops
 
 
-@pytest.mark.parametrize("result,reason", [("rejected", "answer_no"), ("unknown", "ambiguous")])
+@pytest.mark.parametrize("result,reason", [("rejected", "answer_no"), ("unknown", "ambiguous"),
+                                          ("rejected", "upper_color_mismatch"),
+                                          ("rejected", "upper_garment_mismatch"),
+                                          ("unknown", "subject_unknown"),
+                                          ("unknown", "upper_color_unknown"),
+                                          ("unknown", "upper_garment_unknown")])
 def test_valid_nonmatch_or_uncertainty_continues_search(result, reason):
     sup, clock, motor, _ = setup()
     start(sup)

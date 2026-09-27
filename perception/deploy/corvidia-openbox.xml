@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<openbox_config xmlns="http://openbox.org/3.4/rc">
+  <focus><focusNew>yes</focusNew><followMouse>no</followMouse></focus>
+  <placement><policy>Smart</policy><center>yes</center></placement>
+  <desktops><number>1</number><firstdesk>1</firstdesk></desktops>
+  <theme>
+    <name>Clearlooks</name>
+    <!-- Keep visible maximize/close buttons; no minimize without a taskbar. -->
+    <titleLayout>LMC</titleLayout>
+    <keepBorder>yes</keepBorder>
+  </theme>
+  <keyboard>
+    <keybind key="A-F4"><action name="Close"/></keybind>
+    <keybind key="A-Tab"><action name="NextWindow"/></keybind>
+  </keyboard>
+  <mouse>
+    <context name="Titlebar">
+      <mousebind button="Left" action="Press"><action name="Focus"/><action name="Raise"/></mousebind>
+      <mousebind button="Left" action="Drag"><action name="Move"/></mousebind>
+      <mousebind button="Left" action="DoubleClick"><action name="ToggleMaximize"/></mousebind>
+    </context>
+    <context name="Client">
+      <mousebind button="Left" action="Press"><action name="Focus"/><action name="Raise"/></mousebind>
+    </context>
+    <context name="Close">
+      <mousebind button="Left" action="Click"><action name="Close"/></mousebind>
+    </context>
+    <context name="Maximize">
+      <mousebind button="Left" action="Click"><action name="ToggleMaximize"/></mousebind>
+    </context>
+  </mouse>
+  <applications>
+    <application class="Tk" title="Corvidia · Search &amp; Rescue">
+      <maximized>yes</maximized><decor>yes</decor>
+    </application>
+    <application class="*" type="dialog">
+      <position><x>center</x><y>center</y></position><decor>yes</decor>
+    </application>
+  </applications>
+</openbox_config>

@@ -5,12 +5,14 @@ from __future__ import annotations
 import argparse
 import copy
 import io
+import math
 from pathlib import Path
 import queue
 import threading
 import time
 from urllib.parse import urlencode
 
+from .appearance import compile_appearance
 from .stand_cli import ApiClient, ClientError, DEFAULT_SESSION, load_session
 
 
@@ -29,12 +31,57 @@ GUIDANCE = {"hold": "Hold the stand still", "search_right": "Turn the stand slow
 
 
 def description(value):
-    if not isinstance(value, str) or not 1 <= len(value.strip()) <= 240:
-        raise ValueError("Describe the person's visible appearance in 1–240 characters.")
-    value = value.strip()
-    if any(ord(char) < 32 or ord(char) == 127 for char in value):
-        raise ValueError("Use a single line describing visible clothing or accessories.")
-    return value
+    compile_appearance(value)
+    return value.strip()
+
+
+def telemetry_text(status, *, connected=True):
+    """Format reported sensor/link state without implying measured motor speed."""
+    def finite(value):
+        return type(value) in (int, float) and math.isfinite(value)
+
+    preflight, motor = status.get("preflight", {}), status.get("motor", {})
+    frame_age = status.get("perception", {}).get("frame_age_ms")
+    camera_fresh = (connected and preflight.get("camera_ready") is True
+                    and finite(frame_age) and 0 <= frame_age < 500)
+    camera = f"Camera · Live / {frame_age:.0f} ms" if camera_fresh else "Camera · Waiting"
+    if not connected:
+        camera = "Camera · Disconnected"
+    simulated_imu = status.get("telemetry_mode") == "simulated"
+    rx_age = preflight.get("telemetry_rx_age_ms")
+    link_fresh = (connected and preflight.get("telemetry_connected") is True
+                  and finite(rx_age) and 0 <= rx_age < 1500)
+    if simulated_imu:
+        controller = "STM32 · Simulated"
+    elif link_fresh:
+        controller = f"STM32 · Live / {rx_age:.0f} ms"
+    else:
+        controller = "STM32 · Waiting" if connected else "STM32 · Disconnected"
+    imu = status.get("imu", {})
+    attitude = imu.get("ATTITUDE", {})
+    valid_imu = connected and (link_fresh or simulated_imu) and imu.get("IMU_OK") == 1
+
+    def angle(name):
+        value = attitude.get(name)
+        return f"{math.degrees(value):+.1f}°" if valid_imu and finite(value) else "—"
+
+    axes = f"Roll {angle('roll')} · Pitch {angle('pitch')}\nYaw {angle('yaw')}"
+    axes += " · simulated" if simulated_imu else " · sensor frame"
+    simulated_motors = status.get("mode") == "observe"
+    label = "Sim input" if simulated_motors else "Motor input"
+    if not connected or not motor.get("connected") or (not simulated_motors and not link_fresh):
+        inputs = f"{label} · Unavailable"
+    elif motor.get("zero_confirmed") is True:
+        inputs = f"{label} · Zero reported"
+    elif motor.get("stop_status") == "unverified":
+        inputs = f"{label} · Stop unverified"
+    elif motor.get("stop_reason"):
+        inputs = f"{label} · Stop requested"
+    elif finite(motor.get("requested_percent")):
+        inputs = f"{label} · {motor['requested_percent']:g}% requested"
+    else:
+        inputs = f"{label} · Awaiting telemetry"
+    return {"camera": camera, "controller": controller, "attitude": axes, "motors": inputs}
 
 
 class ConsoleController:
@@ -270,7 +317,7 @@ class MissionWindow:
 
         self.tk, self.ttk, self.controller = tk, ttk, controller
         self.root = root or tk.Tk()
-        self.root.title("Corvidia · Mission console")
+        self.root.title("Corvidia · Search & Rescue")
         screen_width, screen_height = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
         self.compact = screen_width <= 800 or screen_height <= 600
         self.usable_width = min(1240, screen_width - 80)
@@ -288,22 +335,34 @@ class MissionWindow:
         style.configure("TFrame", background="#0b121c")
         style.configure("Panel.TFrame", background="#142131")
         style.configure("TLabel", background="#142131", foreground="#e9eff6", font=("DejaVu Sans", 11))
-        style.configure("Muted.TLabel", foreground="#a9bbce", font=("DejaVu Sans", 10))
-        style.configure("Title.TLabel", background="#0b121c", font=("DejaVu Sans", 22, "bold"))
+        style.configure("Muted.TLabel", foreground="#91a8be", font=("DejaVu Sans", 10))
+        style.configure("Title.TLabel", background="#0b121c", font=("DejaVu Sans", 24, "bold"))
+        style.configure("Subtitle.TLabel", background="#0b121c", foreground="#6dcfbd", font=("DejaVu Sans", 11))
+        style.configure("Section.TLabel", foreground="#d5e6f0", font=("DejaVu Sans", 13, "bold"))
+        style.configure("Telemetry.TLabel", foreground="#a9c4d5", font=("DejaVu Sans", 10), padding=(0, 3))
         style.configure("Badge.TLabel", background="#233b49", foreground="#99ecda", padding=10)
         style.configure("Cue.TLabel", foreground="#9ce9d7", font=("DejaVu Sans", 20, "bold"))
         style.configure("Find.TButton", background="#89e0ce", foreground="#102b25", font=("DejaVu Sans", 12, "bold"), padding=11)
+        style.map("Find.TButton", background=[("disabled", "#294047"), ("active", "#a9f2e2")],
+                  foreground=[("disabled", "#81999d")])
         style.configure("Abort.TButton", background="#a23d4c", foreground="#ffffff", font=("DejaVu Sans", 11, "bold"), padding=10)
+        style.map("Abort.TButton", background=[("disabled", "#392a34"), ("active", "#bd4b5b")],
+                  foreground=[("disabled", "#a28e96")])
+        style.configure("Quiet.TButton", background="#203449", foreground="#c4d8e4", padding=5)
         style.configure("TCheckbutton", background="#142131", foreground="#e9eff6", font=("DejaVu Sans", 11))
 
         if self.compact:
             style.configure("TLabel", font=("DejaVu Sans", 9))
             style.configure("Muted.TLabel", font=("DejaVu Sans", 9))
             style.configure("Title.TLabel", font=("DejaVu Sans", 12, "bold"))
+            style.configure("Subtitle.TLabel", font=("DejaVu Sans", 8))
+            style.configure("Section.TLabel", font=("DejaVu Sans", 10, "bold"))
+            style.configure("Telemetry.TLabel", font=("DejaVu Sans", 8), padding=(0, 1))
             style.configure("Badge.TLabel", font=("DejaVu Sans", 8, "bold"), padding=4)
             style.configure("Cue.TLabel", font=("DejaVu Sans", 11, "bold"))
             style.configure("Find.TButton", font=("DejaVu Sans", 10, "bold"), padding=5)
             style.configure("Abort.TButton", font=("DejaVu Sans", 10, "bold"), padding=5)
+            style.configure("Quiet.TButton", font=("DejaVu Sans", 9), padding=3)
             style.configure("TCheckbutton", font=("DejaVu Sans", 9))
             self._build_compact()
             self.render()
@@ -313,7 +372,10 @@ class MissionWindow:
         outer.pack(fill="both", expand=True)
         header = ttk.Frame(outer)
         header.pack(fill="x", pady=(0, 20))
-        ttk.Label(header, text="Corvidia  /  Mission console", style="Title.TLabel").pack(side="left")
+        brand = ttk.Frame(header)
+        brand.pack(side="left")
+        ttk.Label(brand, text="Corvidia", style="Title.TLabel").pack(anchor="w")
+        ttk.Label(brand, text="Search & Rescue", style="Subtitle.TLabel").pack(anchor="w", pady=(3, 0))
         self.badge = ttk.Label(header, text="Connecting", style="Badge.TLabel")
         self.badge.pack(side="right")
         content = ttk.Frame(outer)
@@ -324,29 +386,29 @@ class MissionWindow:
         left.grid(row=0, column=0, sticky="nsew", padx=(0, 18))
         left.grid_propagate(False)
         left.columnconfigure(0, weight=1)
-        ttk.Label(left, text="Find a person", font=("DejaVu Sans", 17, "bold")).grid(row=0, column=0, sticky="w")
-        ttk.Label(left, text="Describe visible clothing or accessories.", style="Muted.TLabel", wraplength=280).grid(row=1, column=0, sticky="w", pady=(8, 10))
+        ttk.Label(left, text="Mission brief", style="Section.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 12))
         self.input = tk.Text(left, height=4, width=29, wrap="word", bg="#09131f", fg="#eef4fa",
                              insertbackground="#eef4fa", relief="flat", padx=10, pady=10,
                              font=("DejaVu Sans", 12))
         self.input.grid(row=2, column=0, sticky="ew")
-        self.input.bind("<Key>", lambda _event: setattr(self, "local_error", ""))
-        ttk.Label(left, text="Example: a person wearing a red shirt", style="Muted.TLabel", wraplength=280).grid(row=3, column=0, sticky="w", pady=(6, 14))
-        self.find = ttk.Button(left, text="Find person", style="Find.TButton", command=self.submit)
-        self.find.grid(row=4, column=0, sticky="ew")
+        self._bind_prompt()
+        self.find = ttk.Button(left, text="Begin search", style="Find.TButton", command=self.submit)
+        self.find.grid(row=4, column=0, sticky="ew", pady=(14, 0))
         self.abort_button = ttk.Button(left, text="Abort mission", style="Abort.TButton", command=self.abort)
         self.abort_button.grid(row=5, column=0, sticky="ew", pady=(10, 20))
         self.status_label = ttk.Label(left, text="Connecting…", wraplength=280)
         self.status_label.grid(row=6, column=0, sticky="w")
+        self.telemetry_label = ttk.Label(left, text="", style="Telemetry.TLabel", wraplength=280)
+        self.telemetry_label.grid(row=7, column=0, sticky="w", pady=(14, 0))
         self.health_label = ttk.Label(left, text="", style="Muted.TLabel", wraplength=280)
-        self.health_label.grid(row=7, column=0, sticky="w", pady=(10, 14))
+        self.health_label.grid(row=8, column=0, sticky="w", pady=(10, 14))
         self.notice_label = ttk.Label(left, text="", style="Muted.TLabel", wraplength=280)
-        self.notice_label.grid(row=8, column=0, sticky="w")
+        self.notice_label.grid(row=9, column=0, sticky="w")
         self.error_label = ttk.Label(left, text="", foreground="#ffb3b9", wraplength=280)
-        self.error_label.grid(row=9, column=0, sticky="w", pady=(12, 0))
-        left.rowconfigure(10, weight=1)
+        self.error_label.grid(row=10, column=0, sticky="w", pady=(12, 0))
+        left.rowconfigure(11, weight=1)
         ttk.Label(left, text="Closing this window does not stop the mission. The Jetson owns execution.",
-                  style="Muted.TLabel", wraplength=280).grid(row=11, column=0, sticky="sw", pady=(20, 0))
+                  style="Muted.TLabel", wraplength=280).grid(row=12, column=0, sticky="sw", pady=(20, 0))
         right = ttk.Frame(content, style="Panel.TFrame", padding=18)
         right.grid(row=0, column=1, sticky="nsew")
         right.columnconfigure(0, weight=1)
@@ -375,33 +437,47 @@ class MissionWindow:
         outer.pack(fill="both", expand=True)
         header = ttk.Frame(outer)
         header.pack(fill="x", pady=(0, 4))
-        ttk.Label(header, text="Corvidia", style="Title.TLabel").pack(side="left")
+        brand = ttk.Frame(header)
+        brand.pack(side="left")
+        ttk.Label(brand, text="Corvidia", style="Title.TLabel").pack(side="left")
+        ttk.Label(brand, text=" / Search & Rescue", style="Subtitle.TLabel").pack(side="left", padx=(4, 0))
         self.badge = ttk.Label(header, text="Connecting", style="Badge.TLabel")
         self.badge.pack(side="right")
         self.cue = ttk.Label(outer, text="Waiting for camera", style="Cue.TLabel", wraplength=self.usable_width - 20)
         self.cue.pack(fill="x", pady=(0, 5))
+        # Reserve the status footer before the expanding camera/body consumes
+        # space. It must remain visible when a validation error wraps.
+        footer = ttk.Frame(outer)
+        footer.pack(side="bottom", fill="x", pady=(3, 0))
+        self.error_label = ttk.Label(footer, text="", foreground="#ffb3b9", wraplength=self.usable_width - 20)
+        self.error_label.pack(fill="x")
+        self.closing_note = ttk.Label(footer, text="Closing the window leaves the onboard mission running.",
+                                     style="Muted.TLabel")
+        self.closing_note.pack(anchor="w", pady=(2, 0))
         body = ttk.Frame(outer)
         body.pack(fill="both", expand=True)
         body.columnconfigure(0, weight=0, minsize=190)
         body.columnconfigure(1, weight=1)
         body.rowconfigure(0, weight=1)
-        form = ttk.Frame(body, style="Panel.TFrame", padding=6)
+        form = ttk.Frame(body, style="Panel.TFrame", padding=5)
         form.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
         form.columnconfigure(0, weight=1)
-        ttk.Label(form, text="Describe the person").grid(row=0, column=0, sticky="w")
-        self.input = tk.Text(form, height=3, width=19, wrap="word", bg="#09131f", fg="#eef4fa",
-                             insertbackground="#eef4fa", relief="flat", padx=5, pady=5,
+        ttk.Label(form, text="Mission brief", style="Section.TLabel").grid(row=0, column=0, sticky="w")
+        self.input = tk.Text(form, height=1, width=19, wrap="word", bg="#09131f", fg="#eef4fa",
+                             insertbackground="#eef4fa", relief="flat", padx=5, pady=3,
                              font=("DejaVu Sans", 10))
-        self.input.grid(row=1, column=0, sticky="ew", pady=(4, 6))
-        self.input.bind("<Key>", lambda _event: setattr(self, "local_error", ""))
-        self.find = ttk.Button(form, text="Find person", style="Find.TButton", command=self.submit)
+        self.input.grid(row=1, column=0, sticky="ew", pady=(3, 5))
+        self._bind_prompt()
+        self.find = ttk.Button(form, text="Begin search", style="Find.TButton", command=self.submit)
         self.find.grid(row=2, column=0, sticky="ew")
         self.abort_button = ttk.Button(form, text="Abort mission", style="Abort.TButton", command=self.abort)
-        self.abort_button.grid(row=3, column=0, sticky="ew", pady=(5, 5))
-        self.details_button = ttk.Button(form, text="Details", command=self._show_details)
-        self.details_button.grid(row=4, column=0, sticky="ew")
+        self.abort_button.grid(row=3, column=0, sticky="ew", pady=(4, 4))
         self.status_label = ttk.Label(form, text="Connecting…", wraplength=175)
-        self.status_label.grid(row=5, column=0, sticky="w", pady=(6, 0))
+        self.status_label.grid(row=4, column=0, sticky="w", pady=(4, 3))
+        self.telemetry_label = ttk.Label(form, text="", style="Telemetry.TLabel", wraplength=175)
+        self.telemetry_label.grid(row=5, column=0, sticky="w")
+        self.details_button = ttk.Button(form, text="Details", style="Quiet.TButton", command=self._show_details)
+        self.details_button.grid(row=6, column=0, sticky="ew", pady=(3, 0))
         camera = ttk.Frame(body, style="Panel.TFrame", padding=4)
         camera.grid(row=0, column=1, sticky="nsew")
         camera.columnconfigure(0, weight=1)
@@ -414,11 +490,6 @@ class MissionWindow:
         self.preview.bind("<Configure>", lambda _event: setattr(self, "last_frame", -1))
         self.camera_label = ttk.Label(camera, text="", style="Muted.TLabel", wraplength=self.usable_width - 230)
         self.camera_label.grid(row=1, column=0, sticky="ew", pady=(3, 0))
-        self.error_label = ttk.Label(outer, text="", foreground="#ffb3b9", wraplength=self.usable_width - 20)
-        self.error_label.pack(fill="x", pady=(5, 0))
-        ttk.Label(outer, text="Closing the window leaves the onboard mission running.",
-                  style="Muted.TLabel").pack(anchor="w", pady=(4, 0))
-
         self.details = tk.Toplevel(self.root)
         self.details.title("Corvidia · Mission details")
         self.details.geometry(f"{self.usable_width - 10}x{self.usable_height - 10}+76+45")
@@ -459,6 +530,15 @@ class MissionWindow:
         self.details.deiconify()
         self.details.lift()
 
+    def _bind_prompt(self):
+        self.input.bind("<Key>", lambda _event: setattr(self, "local_error", ""))
+        self.input.bind("<Return>", self._submit_from_enter)
+        self.input.bind("<KP_Enter>", self._submit_from_enter)
+
+    def _submit_from_enter(self, _event=None):
+        self.submit()
+        return "break"  # consume the key before Tk inserts a newline
+
     def _readiness(self):
         tk, ttk = self.tk, self.ttk
         window = tk.Toplevel(self.root)
@@ -497,8 +577,11 @@ class MissionWindow:
 
     def submit(self):
         try:
+            raw = self.input.get("1.0", "end-1c")
+            if not raw.strip() or not self.controller.snapshot()["can_submit"]:
+                return
             self.local_error = ""
-            text = description(self.input.get("1.0", "end-1c"))
+            text = description(raw)
             readiness = self._readiness() if self.controller.expected_mode == "hardware" else None
             if self.controller.expected_mode == "hardware" and readiness is None:
                 return
@@ -528,7 +611,8 @@ class MissionWindow:
         status = view["status"]
         mode = status.get("mode")
         self.badge.configure(text={"observe": "OBSERVE · motors simulated", "hardware": "HARDWARE", "telemetry": "READ-ONLY TELEMETRY"}.get(mode, "Connecting"))
-        self.find.configure(state="normal" if view["can_submit"] else "disabled")
+        entered = bool(self.input.get("1.0", "end-1c").strip())
+        self.find.configure(state="normal" if view["can_submit"] and entered else "disabled")
         self.abort_button.configure(state="normal" if view["can_abort"] else "disabled")
         state = status.get("state", "connecting")
         mission = view["mission_id"]
@@ -540,11 +624,11 @@ class MissionWindow:
         cue = GUIDANCE.get(status.get("guidance"), "Hold the stand still")
         self.cue.configure(text=cue if view["connected"] else "Disconnected · check onboard mission status")
         preflight = status.get("preflight", {})
-        imu = status.get("telemetry_mode", "unknown").replace("_", " ")
         memory = preflight.get("memory_available_mib")
         memory_label = f"{memory:.0f} MiB available" if isinstance(memory, (int, float)) else "awaiting measurement"
-        imu_ready = preflight.get("telemetry_ready")
-        self.health_label.configure(text=f"Service: {'connected' if view['connected'] else 'reconnecting'}\nIMU: {imu} · {'ready' if imu_ready else 'not ready'}\nCamera: {'ready' if preflight.get('camera_ready') else 'waiting'}\nMemory: {memory_label}")
+        telemetry = telemetry_text(status, connected=view["connected"])
+        self.telemetry_label.configure(text="\n".join(telemetry.values()))
+        self.health_label.configure(text=f"Service: {'connected' if view['connected'] else 'reconnecting'}\nMemory: {memory_label}")
         self.notice_label.configure(text=view["notice"])
         self.error_label.configure(text=self.local_error or view["network_error"] or status.get("error") or preflight.get("resource_error") or "")
         age = status.get("perception", {}).get("frame_age_ms")

@@ -12,15 +12,19 @@ This is a stand demonstration. All four motors receive the same fixed demo
 input. Guidance changes what the operator does with the stand; it does not send
 flight-controller movement commands.
 
-## Current headless setup
+## Onboard operation
 
-The validated hardware backend remains running on the Jetson with its last
-mission completed. The operator confirmed that all four motors stopped and
-unplugged the ESC battery. No new mission starts automatically. Use the
+Use the
 [maintenance terminal commands](#maintenance-terminal-commands) to inspect
 status, watch guidance, explicitly submit another mission, or stop one. The
 backend stays running when the terminal or SSH connection closes; the STM32
 firmware remains v5. A future powered run requires fresh readiness confirmation.
+
+To keep the camera GUI while freeing the GNOME desktop's memory, select the
+optional **Corvidia console (Xorg)** session at login. It opens only a lightweight
+window manager and the mission console, attaching to the already running backend.
+See [installation and session selection](deploy/CORVIDIA_SESSION.md). The normal
+Ubuntu session remains available from the same login menu.
 
 ## Launch the native console on the Jetson
 
@@ -33,8 +37,16 @@ cd ~/corvidia/perception
 
 This opens the native `corvidia-console` window with a live camera view, person
 appearance prompt, mission status, manual turn/HOLD guidance, saved-image result,
-and explicit Stop. There are no motor-input or duration controls. Enter a visible
-description such as **person wearing a red shirt**, then submit the mission once.
+and explicit Abort. The Search & Rescue layout uses a **Mission brief** field
+and **Begin search** button. Enter or keypad Enter submits through the same
+validation and readiness checks as the button, without adding a newline or
+duplicating an already pending request. There are no motor-input or duration
+controls. Enter a visible description such as **person wearing a red shirt**.
+
+The sidebar shows camera and STM32 link freshness, IMU roll/pitch/yaw in the
+sensor frame, and requested motor input. Missing or stale telemetry is unavailable;
+requested input is not measured RPM. Observation mode explicitly labels simulated
+motor input. Compact displays keep detailed status in a separate Details window.
 
 The launcher starts the backend in observation mode if it is inactive. It keeps
 an existing service running and refuses a mode mismatch. With an already running
@@ -45,6 +57,40 @@ For a separately commissioned hardware-mode service, use
 `./deploy/stand-console.sh --hardware`. It requires that service to be active
 already and presents the five physical readiness checks for each mission. The
 launcher never switches an observation service into hardware mode.
+
+## Clothing matching
+
+YOLO finds person candidates. It does not decide whether clothing matches.
+Cosmos observes the selected person's outermost visible upper garment and color **without receiving
+the requested traits**. The worker then compares those observations against every
+compiled requirement. For example, **find someone with a blue polo** requires
+both `blue` and `polo`. A white polo or a blue T-shirt cannot complete that mission.
+A bare model `yes`, a missing field, or an unknown requested attribute cannot pass.
+The saved event includes requirements, observations, comparison result, and revisions.
+
+The model identifies the garment before its color, so both attributes describe
+the same clothing layer. Clothing underneath a jacket is outside this initial
+matching scope; uncover the requested top for the demonstration. The earlier
+color-first prompt misclassified layered clothing in a live test and was replaced.
+
+Supported input is a generic person, or one upper garment with an optional basic
+color: e.g. **person**, **white polo**, **person wearing a red shirt**. Garments are
+polo, T-shirt, shirt, hoodie, sweater, jacket, coat, vest, and tank top. Basic
+colors are black, white, gray/grey, red, orange, yellow, green, blue, purple, pink,
+brown, beige, and multicolor. A general `shirt` accepts shirt, T-shirt, or polo;
+`polo` and `T-shirt` each require their own garment type.
+
+Descriptions containing additional traits such as hats, patterns, color shades,
+multiple garments, identity, or negation are rejected before a mission starts.
+They are never reduced silently to a generic person request.
+
+Clothing decisions depend on what the camera shows. During diagnosis, the operator
+identified a real blue polo that appeared white in the camera under the current
+lighting. The new observation prompt reports white on that saved crop, so a blue
+request is rejected. A reliably visible blue example is still needed to validate
+blue-polo recall. Blur, occlusion, lighting, and model errors remain limitations;
+attribute comparison does not make the visual model infallible. The 4-second
+confirmation deadline remains in force.
 
 ## Modes and fixed demo profile
 
@@ -206,6 +252,11 @@ its interactive readiness confirmations. The flag does not change the service
 mode. Observation mode retains simulated motor output. The private operator
 session at `~/.local/state/corvidia/stand-8080.json` stays on the Jetson; the CLI
 reads it without putting its token in command arguments or printed output.
+
+After restarting the backend service, reopen any native console or long-running
+client. Each backend start creates a new operator token; an existing window may
+resume read-only status polling while its old token can no longer submit or stop
+missions. A fresh client loads the new private session file.
 
 ### Headless operation
 
@@ -479,5 +530,68 @@ The committed `frame.jpg`, `crop.jpg`, and `event.json` are on the Jetson in:
 
 The run audit is
 `~/corvidia-data/integration/headless-full-pipeline-hardware.json`.
-The hardware backend remains running in its completed state with no automatic
-mission restart; ESC power is disconnected. The STM32 firmware was unchanged.
+At the end of that run, the hardware backend remained in its completed state
+with no automatic mission restart; the operator disconnected ESC power.
+The STM32 firmware was unchanged. Later clothing validation uses observation mode.
+
+## Clothing and app-only console validation — 2026-09-27
+
+The original appearance prompt returned an overall `yes` for a requested blue
+polo when the camera showed a white-appearing top. The description had reached
+the model correctly; the failure was visual confirmation. An initial independent
+attribute prompt also confused the layers of a dark jacket over a white shirt.
+That failed live capture remains in the audit trail; it is not a validated match.
+
+The final prompt observes the outermost garment **before** its color, with no
+requested traits in the model input. On three frozen views from this session it
+reported white/polo for the two operator-identified polo views, and black/jacket
+for the layered view. Comparisons reject the wrong color or garment and accept
+the matching visible combination. Inference took 2.61–3.05 seconds alongside
+camera/YOLO, under the unchanged four-second deadline. The operator's real blue
+polo still appears white under this lighting, so blue-positive recall is not
+established. This is a small regression check, not a calibrated accuracy study.
+
+The model server keeps the same pinned weights, 2048-token context, and one slot.
+Explicit logical/physical batches of `512/128` replace the larger defaults. With
+the camera and app-only GUI active, available memory measured about 2.0–2.5 GiB;
+the 1536 MiB resource guard remains unchanged. No STM32 firmware was changed.
+
+The optional session was opened on the physical Jetson display with Openbox and
+the mission console; GNOME Shell was absent. A public root-owned wrapper makes
+the session visible to GDM without opening the private home directory's permissions.
+A machine-local Xprofile rule selects 1920×1080 at 60 Hz only for Corvidia.
+Sixty orphaned NVIDIA desktop-indicator children from prior GNOME sessions were
+stopped through their three identified desktop scopes.
+
+Actual Tk checks in isolated X displays exercise Enter once, repeated Enter,
+and the layouts at 640×480 and 1920×1080 without sending a live mission command.
+The software suite passed 538 tests (seven GPU/camera tests excluded); after the
+small-screen footer adjustment, all 44 GUI tests passed under Xvfb, including
+the new real-Tk geometry check with a two-line validation error.
+Installing Xvfb for these checks also installed the distribution's compatible
+X server/package dependency updates. The normal Ubuntu session remains available.
+
+Diagnostic reports and images remain outside the checkout under:
+
+```text
+~/corvidia-data/integration/appearance-attribute-validation.json
+~/corvidia-data/integration/appearance-layered-probe.json
+~/corvidia-data/integration/appearance-layered-order-probe.json
+~/corvidia-data/integration/gui-compact.png
+~/corvidia-data/integration/gui-desktop.png
+```
+
+Final camera missions ran in **observation mode**, with real perception and
+read-only STM32 telemetry but simulated motor commands:
+
+| Request | Result |
+| --- | --- |
+| `find someone with a blue polo` | Nonmatching candidates rejected; search continued until the diagnostic explicitly stopped it after 14 seconds. No successful capture. |
+| `black jacket` | Matching outer garment captured, evidence committed, simulated zero-input stop verified. |
+
+The positive mission (`8226f5d8555d41958b9d793ff1b465b2`) requested simulated
+stop 9.48 ms after evidence commit, or 3037.61 ms after source capture. Its lowest
+sampled memory was 2144.93 MiB. The two audits are
+`~/corvidia-data/integration/appearance-final-negative-mission.json` and
+`appearance-final-positive-mission.json` in that same directory. These checks
+did not send physical motor commands. ESC power was disconnected by the operator.

@@ -127,6 +127,36 @@ def test_answer_is_parsed_with_usage_and_schema(server):
     assert body["temperature"] == 0.0
 
 
+def test_appearance_payload_is_independent_of_desired_traits(server):
+    from corvidia_perception.cosmos import APPEARANCE_SCHEMA
+    backend = backend_for(server)
+    one = ConfirmRequest("a", b"samejpeg", "Find a blue polo", {
+        "target_appearance": "find someone with a blue polo",
+        "required_traits": {"upper_color": "blue", "upper_garment": "polo"},
+    })
+    two = ConfirmRequest("b", b"samejpeg", "Find a red hoodie", {
+        "target_appearance": "find someone with a red hoodie",
+    })
+    payload = backend.build_payload(one)
+    assert payload == backend.build_payload(two)
+    assert payload["response_format"]["json_schema"]["schema"] == APPEARANCE_SCHEMA
+    assert list(APPEARANCE_SCHEMA["properties"]) == ["subject", "upper_garment", "upper_color"]
+    assert payload["max_tokens"] == 96
+    assert "blue polo" not in json.dumps(payload)
+    assert "required_traits" not in json.dumps(payload)
+
+
+def test_appearance_observations_remain_raw_for_worker_evaluation(server):
+    server.answer = '{"subject":"human","upper_color":"white","upper_garment":"polo"}'
+    req = ConfirmRequest("obs", b"fakejpeg", "", {"target_appearance": "blue polo"})
+    future = backend_for(server).submit(req)
+    wait(future)
+    reply = future.result()
+    assert reply.text == server.answer
+    # The legacy yes/no parser cannot turn observations into person-only success.
+    assert normalize(future)[0] is Result.UNKNOWN
+
+
 @pytest.mark.parametrize("mode, answer, expected", [
     ("answer", '{"answer": "no"}', (Result.REJECTED, "answer_no")),
     ("answer", '{"answer": "uncertain"}', (Result.UNKNOWN, "ambiguous")),

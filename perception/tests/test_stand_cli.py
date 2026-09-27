@@ -118,6 +118,14 @@ def test_invalid_description_never_contacts_supervisor(appearance):
     assert api.status_calls == 0 and not api.posts
 
 
+@pytest.mark.parametrize("appearance", ["blue polo and glasses", "person holding a bag", "blue hat"])
+def test_cli_explains_unsupported_traits_without_contacting_supervisor(appearance):
+    control, api, _, output = runner()
+    assert control.run(appearance) == 1
+    assert api.status_calls == 0 and not api.posts
+    assert any("not supported" in row and "polo" in row for row in output)
+
+
 @pytest.mark.parametrize("args", [["--percent", "5"], ["--seconds", "10"]])
 def test_cli_has_no_power_or_duration_options(args):
     with pytest.raises(SystemExit) as exc:

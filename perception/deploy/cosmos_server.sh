@@ -6,6 +6,9 @@
 #   Q4_K_M server ~2.9 GB (Q8_0 was 3.8 GB); full stack left >= 1.7 GB available.
 #   -c 2048 fits a 448 px crop (<= ~300 tokens) with room to spare; one slot; no
 #   RAM prompt cache (llama-server defaults to 4 slots, 8192 ctx, 8 GB cache).
+#   Explicit 512/128 logical/physical token batches bound inference buffers;
+#   defaults of 2048/512 left too little room for the app-only graphical session.
+#   Camera + GUI + final appearance replays left about 2.4 GiB available locally.
 #
 # Usage: deploy/cosmos_server.sh [fetch|start|stop|status]
 set -euo pipefail
@@ -38,7 +41,7 @@ start() {
   sudo docker run -d --name cosmos --restart unless-stopped --runtime=nvidia --network host \
     -v "$DIR:/models:ro" "$IMAGE" \
     llama-server -m "/models/$MODEL" --mmproj "/models/$MMPROJ" \
-      --host 127.0.0.1 --port 8010 -c 2048 -np 1 -cram 0 -fa on \
+      --host 127.0.0.1 --port 8010 -c 2048 -np 1 -cram 0 -fa on -b 512 -ub 128 \
       --reasoning-budget 0 --no-webui
   for _ in $(seq 90); do
     curl -sf -m 1 http://127.0.0.1:8010/health >/dev/null && { echo "cosmos healthy"; return; }

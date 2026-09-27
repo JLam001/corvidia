@@ -1,6 +1,8 @@
 """Native console tests never create a camera, serial connection, or Tk display."""
 
 import copy
+import math
+import os
 import threading
 
 import pytest
@@ -71,6 +73,15 @@ def test_invalid_description_never_queues_a_mission(value):
     assert not control.process_command_once() and api.posts == []
 
 
+@pytest.mark.parametrize("value", ["blue hat", "blue polo and glasses", "person with a bag"])
+def test_unsupported_description_never_queues_or_marks_submission_pending(value):
+    control, api = controller()
+    with pytest.raises(ValueError):
+        control.submit(value)
+    assert not control.process_command_once() and api.posts == []
+    assert control.snapshot()["pending"] is False
+
+
 @pytest.mark.parametrize("override", [{"mode": "hardware"}, {"mission_api": 1},
                                      {"control_authority": "client"}, {"state": "unknown"},
                                      {"state": "searching"}, {"recovery_required": True}])
@@ -102,10 +113,10 @@ def test_hardware_requires_all_five_true_observations_every_submission():
     for invalid in (None, {}, {**flags, "hands_clear": False}, {**flags, "motors_still": 1},
                     {**flags, "extra": True}):
         with pytest.raises(ValueError):
-            control.submit("blue hat", invalid)
-    control.submit("blue hat", flags)
+            control.submit("blue polo", invalid)
+    control.submit("blue polo", flags)
     control.process_command_once()
-    assert api.posts == [("mission", {"appearance": "blue hat", "readiness": flags})]
+    assert api.posts == [("mission", {"appearance": "blue polo", "readiness": flags})]
     api.state["state"] = "complete"
     control.poll_once()
     with pytest.raises(ValueError):
@@ -290,3 +301,168 @@ def test_missing_desktop_display_produces_useful_error_and_no_mutation(monkeypat
     assert gui.main([]) == 1
     assert "terminal on the Jetson desktop" in capsys.readouterr().out
     assert api.posts == []
+
+
+class Prompt:
+    def __init__(self, value):
+        self.value, self.bindings = value, {}
+
+    def get(self, *_):
+        return self.value
+
+    def bind(self, sequence, callback):
+        self.bindings[sequence] = callback
+
+
+def prompt_window(value="person wearing a blue polo", mode="observe", readiness=None):
+    control, api = controller(mode)
+    window = gui.MissionWindow.__new__(gui.MissionWindow)
+    window.controller, window.input, window.local_error = control, Prompt(value), ""
+    observations = []
+
+    def confirm():
+        observations.append(True)
+        return readiness
+
+    window._readiness = confirm
+    window._bind_prompt()
+    return window, api, observations
+
+
+@pytest.mark.parametrize("key", ["<Return>", "<KP_Enter>"])
+def test_enter_consumes_key_and_submits_exactly_once_through_normal_path(key):
+    window, api, observations = prompt_window()
+    assert window.input.bindings[key](None) == "break"
+    assert window.input.bindings[key](None) == "break"  # pending submission blocks repeats
+    assert window.input.value == "person wearing a blue polo"  # no newline inserted
+    assert window.controller.process_command_once()
+    assert not window.controller.process_command_once()
+    assert api.posts == [("mission", {"appearance": window.input.value})]
+    assert observations == []
+
+
+@pytest.mark.parametrize("value,enabled", [("", True), ("  ", True), ("blue polo", False)])
+def test_enter_on_empty_or_unavailable_prompt_cannot_open_readiness_or_queue(value, enabled):
+    window, api, observations = prompt_window(value, mode="hardware")
+    if not enabled:
+        api.state["state"] = "searching"
+        window.controller.poll_once()
+    assert window.input.bindings["<Return>"](None) == "break"
+    assert observations == [] and api.posts == []
+    assert not window.controller.process_command_once()
+
+
+def test_enter_requires_same_hardware_readiness_and_valid_description_as_button():
+    window, api, observations = prompt_window(mode="hardware")
+    assert window.input.bindings["<Return>"](None) == "break"
+    assert observations == [True] and not window.controller.process_command_once()
+    window.input.value = "blue polo and glasses"
+    window.input.bindings["<Return>"](None)
+    assert "not supported" in window.local_error
+    assert observations == [True]  # invalid description never opens physical readiness
+    flags = {name: True for name, _ in gui.READINESS}
+    window.input.value = "blue polo"
+    window._readiness = lambda: flags
+    window.input.bindings["<Return>"](None)
+    assert window.controller.process_command_once()
+    assert api.posts == [("mission", {"appearance": "blue polo", "readiness": flags})]
+
+
+def live_telemetry():
+    return {"mode": "hardware", "telemetry_mode": "live",
+            "perception": {"frame_age_ms": 38.5},
+            "preflight": {"camera_ready": True, "telemetry_connected": True,
+                          "telemetry_rx_age_ms": 18.2},
+            "imu": {"IMU_OK": 1, "ATTITUDE": {"roll": math.pi / 6, "pitch": -math.pi / 12,
+                                                "yaw": math.pi / 2}},
+            "motor": {"connected": True, "requested_percent": 5., "zero_confirmed": False}}
+
+
+def test_sidebar_converts_radians_to_sensor_degrees_and_reports_requested_input():
+    rows = gui.telemetry_text(live_telemetry())
+    assert rows["camera"] == "Camera · Live / 38 ms"
+    assert rows["controller"] == "STM32 · Live / 18 ms"
+    assert rows["attitude"] == "Roll +30.0° · Pitch -15.0°\nYaw +90.0° · sensor frame"
+    assert rows["motors"] == "Motor input · 5% requested"
+    text = " ".join(rows.values()).lower()
+    assert all(claim not in text for claim in ("rpm", "altitude", "location", "hover"))
+
+
+@pytest.mark.parametrize("update", [{"IMU_OK": 0}, {"ATTITUDE": {}},
+                                     {"ATTITUDE": {"roll": float("nan"), "pitch": True, "yaw": float("inf")}}])
+def test_missing_invalid_or_unhealthy_attitude_never_appears_as_zero(update):
+    status = live_telemetry()
+    status["imu"].update(update)
+    rows = gui.telemetry_text(status)
+    assert rows["attitude"] == "Roll — · Pitch —\nYaw — · sensor frame"
+
+
+def test_stale_links_and_disconnection_do_not_show_live_telemetry():
+    status = live_telemetry()
+    status["preflight"]["telemetry_rx_age_ms"] = 1600.
+    status["perception"]["frame_age_ms"] = 501.
+    rows = gui.telemetry_text(status)
+    assert rows["camera"] == "Camera · Waiting" and rows["controller"] == "STM32 · Waiting"
+    assert "30.0" not in rows["attitude"]
+    assert rows["motors"] == "Motor input · Unavailable"
+    rows = gui.telemetry_text(live_telemetry(), connected=False)
+    assert "Disconnected" in rows["camera"] and "Disconnected" in rows["controller"]
+    assert rows["motors"] == "Motor input · Unavailable"
+    assert "30.0" not in rows["attitude"]
+
+
+def test_observation_labels_simulated_motors_while_preserving_real_readonly_imu():
+    status = live_telemetry()
+    status.update(mode="observe", telemetry_mode="live_read_only")
+    rows = gui.telemetry_text(status)
+    assert rows["controller"].startswith("STM32 · Live")
+    assert "sensor frame" in rows["attitude"]
+    assert rows["motors"] == "Sim input · 5% requested"
+    status["telemetry_mode"] = "simulated"
+    rows = gui.telemetry_text(status)
+    assert rows["controller"] == "STM32 · Simulated"
+    assert "simulated" in rows["attitude"]
+
+
+def test_zero_report_and_unverified_stop_are_not_claims_of_physical_stopping():
+    status = live_telemetry()
+    status["motor"]["zero_confirmed"] = True
+    assert gui.telemetry_text(status)["motors"] == "Motor input · Zero reported"
+    status["motor"].update(zero_confirmed=False, stop_status="unverified", stop_reason="operator stop")
+    assert gui.telemetry_text(status)["motors"] == "Motor input · Stop unverified"
+
+
+@pytest.mark.skipif(not os.environ.get("DISPLAY"), reason="Tk geometry requires an X display (use Xvfb)")
+def test_compact_geometry_reserves_error_and_footer_without_hiding_actions():
+    tk = pytest.importorskip("tkinter")
+    root = tk.Tk()
+    root.winfo_screenwidth = lambda: 640
+    root.winfo_screenheight = lambda: 480
+    control, api = controller("hardware")
+    api.state.update(live_telemetry())
+    control.poll_once()
+    window = gui.MissionWindow(control, root=root)
+    try:
+        window.input.insert("1.0", "white polo")
+        window.local_error = ("Use a person or one upper garment, such as 'a person wearing a blue polo'. "
+                              "Extra traits, multiple garments, and negation are not supported.")
+        window.render()
+        root.update()
+        left, top = root.winfo_rootx(), root.winfo_rooty()
+        right, bottom = left + root.winfo_width(), top + root.winfo_height()
+        assert window.compact and (root.winfo_width(), root.winfo_height()) == (560, 390)
+        for widget in (window.input, window.find, window.abort_button, window.telemetry_label,
+                       window.error_label, window.closing_note):
+            assert widget.winfo_ismapped()
+            assert left <= widget.winfo_rootx() < right
+            assert top <= widget.winfo_rooty() < bottom
+            assert widget.winfo_rootx() + widget.winfo_width() <= right
+            assert widget.winfo_rooty() + widget.winfo_height() <= bottom
+            parent = widget.master
+            while parent is not root:
+                assert widget.winfo_rooty() >= parent.winfo_rooty()
+                assert widget.winfo_rooty() + widget.winfo_height() <= parent.winfo_rooty() + parent.winfo_height()
+                parent = parent.master
+        assert window.find.winfo_height() >= 24 and window.abort_button.winfo_height() >= 24
+    finally:
+        window.close()

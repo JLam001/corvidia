@@ -8,17 +8,35 @@ from __future__ import annotations
 
 import enum
 import hashlib
+import json
 import time
 from collections.abc import Callable
 from concurrent.futures import Future
 from dataclasses import dataclass
 
 from .config import PipelineConfig
+from .appearance import VERSION as APPEARANCE_VERSION, compile_appearance, evaluate_appearance
 from .confirm_queue import ConfirmationQueue
 from .confirmer import ConfirmerBackend, normalize
 from .evidence import EvidenceStore, StorageError, encode_jpeg
 from .health import Health
 from .records import SCHEMA_VERSION, Candidate, Completion, ConfirmRequest, Result, Skip, SkipReason
+
+
+def _observed_attributes(raw):
+    """Reject ambiguous keys and values outside JSON before storing observations."""
+    def unique_object(pairs):
+        if len({key for key, _ in pairs}) != len(pairs):
+            raise ValueError("duplicate observation key")
+        return dict(pairs)
+
+    def invalid_constant(_value):
+        raise ValueError("nonfinite observation value")
+
+    try:
+        return json.loads(raw, object_pairs_hook=unique_object, parse_constant=invalid_constant)
+    except (ValueError, TypeError):
+        return None
 
 
 def target_crop(candidate: Candidate):
@@ -79,6 +97,7 @@ class ConfirmationWorker:
         self._emit = emit
         self._wall = wall
         self._appearance = appearance
+        self._requirements = compile_appearance(appearance) if appearance is not None else None
         self._notify = notify or (lambda _: None)
         if appearance is not None:
             from .cosmos import APPEARANCE_SYSTEM, validate_appearance
@@ -174,20 +193,39 @@ class ConfirmationWorker:
     def _check_active(self, now: float) -> None:
         f = self._inflight
         assert f is not None
-        if f.future.done():
-            result, reason, details = normalize(f.future)
-            self._finish(f, result, reason, now, details)
-            self._inflight = None
-            self.state = WorkerState.IDLE
-        elif now >= f.deadline:
+        # Completion can arrive after the deadline but before this tick. Without
+        # a trustworthy completion timestamp, the deadline must win that race.
+        if now >= f.deadline:
             self._health.incr("confirmation_timeouts")
             self._finish(f, Result.UNKNOWN, "timeout", now)
-            if self._backend.cancel(f.candidate.event_id):
+            if f.future.done():
+                self._health.incr("late_results_ignored")
+                self._inflight = None
+                self.state = WorkerState.IDLE
+            elif self._backend.cancel(f.candidate.event_id):
                 self._inflight = None
                 self.state = WorkerState.IDLE
             else:
                 self._draining_since = now
                 self.state = WorkerState.DRAINING
+        elif f.future.done():
+            result, reason, details = normalize(f.future)
+            if self._requirements is not None and "error" not in details:
+                # The model describes the selected person without being told the
+                # desired traits. Code, not an overall model yes/no, decides a match.
+                observed = _observed_attributes(details.get("raw_output"))
+                evaluation = evaluate_appearance(self._requirements, observed)
+                result = {"matched": Result.CONFIRMED, "rejected": Result.REJECTED,
+                          "unknown": Result.UNKNOWN}[evaluation.result]
+                reason = evaluation.reason
+                details["appearance_evaluation"] = {
+                    "version": APPEARANCE_VERSION,
+                    "requirements": self._requirements.to_dict(),
+                    "observed": observed, **evaluation.to_dict(),
+                }
+            self._finish(f, result, reason, now, details)
+            self._inflight = None
+            self.state = WorkerState.IDLE
 
     def _check_draining(self, now: float) -> None:
         f = self._inflight
@@ -322,6 +360,9 @@ class ConfirmationWorker:
             **self._record_extra,
             **({"target": {"class_name": "person", "appearance": self._appearance,
                            "appearance_sha256": hashlib.sha256(self._appearance.encode()).hexdigest(),
+                           "requirements": self._requirements.to_dict(),
+                           "requirements_version": APPEARANCE_VERSION,
+                           "observation_scope": "outermost_visible_upper_garment",
                            "crop_annotation": "TARGET box"}}
                if self._appearance is not None else {}),
         }
