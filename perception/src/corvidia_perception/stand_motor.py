@@ -15,7 +15,7 @@ from typing import Callable
 
 MODE_ID = 0x44534935
 ENABLE_COMMAND, ALL_COMMAND = 31010, 31012
-MAX_PERCENT, MAX_DURATION_MS = 20.0, 60000
+MAX_PERCENT, MAX_DURATION_MS = 25.0, 60000
 LEASE_S, HEARTBEAT_S = .250, .100
 STATUS_MAX_AGE_S = 1.5
 ACK_TIMEOUT_S, STOP_TIMEOUT_S = 1.0, 2.0
@@ -28,7 +28,7 @@ _ZERO = ("DS_ACTIVE", "DS_FAULT", "M1_DS", "M2_DS", "M3_DS", "M4_DS")
 
 def _validate(percent, duration_ms):
     if type(percent) not in (int, float) or not math.isfinite(percent) or not 0 < percent <= MAX_PERCENT:
-        raise ValueError("stand input must be finite and in (0, 20] percent")
+        raise ValueError(f"stand input must be finite and in (0, {MAX_PERCENT:g}] percent")
     if type(duration_ms) is not int or not 20 <= duration_ms <= MAX_DURATION_MS:
         raise ValueError("stand duration must be an integer in [20, 60000] ms")
 

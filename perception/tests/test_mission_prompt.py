@@ -44,6 +44,10 @@ def test_existing_requests_keep_first_match_behavior_and_full_appearance(text):
     ("photograph humans for 10s", 10),
     ("look for people for 2 s", 2),
     ("find  as  many  people  as  possible  within  30  seconds", 30),
+    ("Find as many people in 30 seconds", 30),
+    ("find as many people within 30 seconds", 30),
+    ("find as many people for 30 seconds", 30),
+    ("find as many people as possible in 30 seconds", 30),
 ])
 def test_clear_timed_collection_forms(text, seconds):
     parsed = parse_mission_prompt(text)
@@ -59,6 +63,8 @@ def test_clear_timed_collection_forms(text, seconds):
     "locate as many humans with a blue polo as possible within 30 seconds",
     "find people wearing a blue polo for 30 seconds",
     "search for people in a blue polo for 30 seconds",
+    "find as many people wearing a blue polo in 30 seconds",
+    "find as many people in a blue polo within 30 seconds",
 ])
 def test_timed_collection_preserves_exact_clothing_requirements(text):
     parsed = parse_mission_prompt(text)
@@ -85,7 +91,6 @@ def test_out_of_range_time_is_never_clamped(text):
     "find a person for 30 seconds",
     "find someone wearing a blue polo within 30 seconds",
     "find as many people as possible",
-    "find as many people within 30 seconds",
     "find all people for 30 seconds",
     "find people for 1 minute",
     "find people for thirty seconds",
@@ -127,6 +132,7 @@ def test_timing_wrapper_does_not_hide_unsupported_target_traits(appearance):
     for text in (
         f"find {appearance} for 30 seconds",
         f"find as many {appearance} as possible within 30 seconds",
+        f"find as many {appearance} in 30 seconds",
     ):
         with pytest.raises(MissionPromptValidationError):
             parse_mission_prompt(text)

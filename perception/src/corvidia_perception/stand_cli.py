@@ -42,6 +42,10 @@ class ClientError(Exception):
     pass
 
 
+class SessionRejected(ClientError):
+    """The service rejected authorization before dispatching the request."""
+
+
 class Cancelled(Exception):
     pass
 
@@ -127,6 +131,8 @@ class ApiClient:
                 return result
         except urllib.error.HTTPError as exc:
             # Do not print request objects, headers, redirect locations, or URLs.
+            if exc.code in (401, 403):
+                raise SessionRejected("Operator session rejected. Reopen the console to reconnect to the current service.") from None
             raise ClientError(f"Supervisor rejected the request (HTTP {exc.code})") from None
         except (urllib.error.URLError, TimeoutError, OSError):
             raise ClientError("Supervisor request timed out or connection failed; command outcome may be unknown") from None

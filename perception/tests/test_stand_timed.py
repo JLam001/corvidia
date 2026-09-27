@@ -33,7 +33,7 @@ def capture(sup, clock, track=1, **overrides):
 
 def test_multiple_captures_keep_running_and_deadline_never_moves():
     sup, clock, motor, _ = running()
-    assert motor.starts == [(5, 30000)] and sup.deadline == 130
+    assert motor.starts == [(25, 30000)] and sup.deadline == 130
     for index in range(1, 4):
         clock.t += .1
         progress(sup, clock)

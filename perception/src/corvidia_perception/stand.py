@@ -25,7 +25,7 @@ from .mission_prompt import parse_mission_prompt
 
 ACTIVE = {"starting", "searching", "confirming", "saving"}
 TERMINAL = {"complete", "failed", "timed_out", "cancelled"}
-MISSION_PERCENT = 5.0
+MISSION_PERCENT = 25.0
 MISSION_DURATION_MS = 60_000
 PREPARING_TIMEOUT_S = 15.0
 READINESS = {"guarded_stand", "hands_clear", "power_disconnect_accessible", "motors_still", "esc_startup_finished"}
@@ -36,7 +36,7 @@ class MissionSpec:
     mission_id: str
     appearance: str
     requirements: AppearanceRequirements
-    percent: float = 5.0
+    percent: float = MISSION_PERCENT
     duration_ms: int = MISSION_DURATION_MS
     completion_mode: str = "first_match"
     prompt: str = ""
@@ -50,8 +50,8 @@ class MissionSpec:
             raise ValueError("Duration conflicts with the mission brief")
         if isinstance(percent, bool) or not isinstance(percent, (int, float)) or not math.isfinite(percent):
             raise ValueError("Motor input must be a finite number")
-        if not 0 < percent <= 20:
-            raise ValueError("Stand input must be greater than zero and at most 20%")
+        if not 0 < percent <= MISSION_PERCENT:
+            raise ValueError(f"Stand input must be greater than zero and at most {MISSION_PERCENT:g}%")
         if type(duration_ms) is not int or not 1000 <= duration_ms <= 60_000:
             raise ValueError("Duration must be 1,000–60,000 integer milliseconds")
         return cls(uuid.uuid4().hex, parsed.appearance, parsed.requirements, float(percent),

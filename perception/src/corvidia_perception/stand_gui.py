@@ -13,7 +13,7 @@ import time
 from urllib.parse import urlencode
 
 from .mission_prompt import parse_mission_prompt
-from .stand_cli import ApiClient, ClientError, DEFAULT_SESSION, load_session
+from .stand_cli import ApiClient, ClientError, DEFAULT_SESSION, SessionRejected, load_session
 
 
 ACTIVE = {"preparing", "starting", "searching", "confirming", "saving", "stopping"}
@@ -116,6 +116,7 @@ class ConsoleController:
         self.pending = False
         self.pending_id = None
         self.uncertain = False
+        self.session_rejected = False
         self.abort_pending = False
         self.frame = None
         self.frame_version = 0
@@ -142,15 +143,40 @@ class ConsoleController:
         for thread in self.threads:
             thread.start()
 
-    def _can_submit(self):
+    def _submission_block_reason(self):
+        if self.closed.is_set():
+            return "This console is closed. Reopen the console to start a mission."
+        if not self.connected:
+            return "Waiting for the onboard mission service to reconnect."
         fresh = self.last_status_at is not None and 0 <= self.clock() - self.last_status_at < 2
-        return (self.connected and fresh and not self.closed.is_set() and not self.pending
-                and not self.uncertain and not self.abort_pending
-                and self.status.get("mode") == self.expected_mode
-                and self.status.get("mission_api") == 2
-                and self.status.get("control_authority") == "onboard"
-                and self.status.get("state") in TERMINAL | {"idle"}
-                and not self.status.get("recovery_required"))
+        if not fresh:
+            return "Waiting for fresh mission status from the Jetson."
+        if self.session_rejected:
+            return "Operator session rejected. Reopen the console to reconnect to the current service."
+        if self.uncertain:
+            return "Submission outcome unknown. Check the mission status or explicitly Abort; this request will not be retried."
+        if self.pending:
+            return "Waiting for the Jetson to acknowledge the submitted mission."
+        if self.abort_pending:
+            return "Waiting for the Jetson to acknowledge Abort."
+        if self.status.get("mode") != self.expected_mode:
+            return (f"Console expects {self.expected_mode}; service is {self.status.get('mode', 'unknown')}. "
+                    "Reopen the console for the current service mode.")
+        if self.status.get("mission_api") != 2:
+            return "This console requires mission API version 2. Update the onboard service."
+        if self.status.get("control_authority") != "onboard":
+            return "This console requires an onboard mission service."
+        if self.status.get("recovery_required"):
+            return "Stop is unverified. Check physical stopping and the power disconnect; recover the service before another mission."
+        if self.status.get("state") not in TERMINAL | {"idle"}:
+            return "Wait for the current mission to finish, or explicitly Abort it."
+        # A finished motor session is one-shot and reports ready=False. The
+        # supervisor creates a fresh session after accepting the next mission;
+        # its preflight checks still decide whether motor authority can start.
+        return None
+
+    def _can_submit(self):
+        return self._submission_block_reason() is None
 
     def _reconcile(self):
         # Only an acknowledged ID identifies our submission. Matching text does
@@ -165,7 +191,8 @@ class ConsoleController:
         with self.lock:
             return {"status": copy.deepcopy(self.status), "connected": self.connected,
                     "notice": self.notice, "network_error": self.network_error,
-                    "can_submit": self._can_submit(), "pending": self.pending,
+                    "can_submit": self._can_submit(), "submission_block_reason": self._submission_block_reason(),
+                    "pending": self.pending,
                     "uncertain": self.uncertain, "mission_id": self.pending_id or self.status.get("mission_id"),
                     "can_abort": bool(self.pending_id or self.status.get("mission_id")) and not self.abort_pending and not self.closed.is_set(),
                     "frame": self.frame, "frame_version": self.frame_version,
@@ -184,7 +211,7 @@ class ConsoleController:
             raise ValueError("Observation mode does not require hardware readiness assertions.")
         with self.lock:
             if not self._can_submit():
-                raise ValueError("Wait for a connected, idle service in the selected mode before submitting.")
+                raise ValueError(self._submission_block_reason())
             self.pending = True
             self.pending_id = None
             self.evidence = self.evidence_id = None
@@ -236,7 +263,15 @@ class ConsoleController:
                     self.notice = "Abort requested. Waiting for the onboard stop result."
         except Exception as exc:
             with self.lock:
-                if action == "mission":
+                if isinstance(exc, SessionRejected):
+                    self.session_rejected = True
+                    if action == "mission":
+                        self.pending, self.pending_id, self.uncertain = False, None, False
+                        self.notice = "Mission request rejected before execution. Reopen the console to reconnect; it will not be retried."
+                    else:
+                        self.abort_pending = False
+                        self.notice = "Abort rejected. Do not assume motors stopped; check telemetry and the accessible power disconnect."
+                elif action == "mission":
                     self.uncertain = True
                     self.notice = "Submission outcome unknown. It will not be retried. Check the mission status or explicitly Abort."
                 else:
@@ -273,7 +308,7 @@ class ConsoleController:
                 self.notice = "This console requires an onboard mission service. Submission is disabled."
             elif status.get("mission_api") != 2:
                 self.notice = "This console requires mission API version 2. Update the onboard service."
-            if status.get("recovery_required"):
+            elif status.get("recovery_required"):
                 self.notice = "Stop is unverified. Check physical stopping and the power disconnect; recover the service before another mission."
             elif status.get("state") in TERMINAL:
                 motor = status.get("motor", {})
@@ -597,7 +632,11 @@ class MissionWindow:
     def submit(self):
         try:
             raw = self.input.get("1.0", "end-1c")
-            if not raw.strip() or not self.controller.snapshot()["can_submit"]:
+            if not raw.strip():
+                return
+            view = self.controller.snapshot()
+            if not view["can_submit"]:
+                self.local_error = view["submission_block_reason"]
                 return
             self.local_error = ""
             text = description(raw)
@@ -651,7 +690,7 @@ class MissionWindow:
         telemetry = telemetry_text(status, connected=view["connected"])
         self.telemetry_label.configure(text="\n".join(telemetry.values()))
         self.health_label.configure(text=f"Service: {'connected' if view['connected'] else 'reconnecting'}\nMemory: {memory_label}")
-        self.notice_label.configure(text=view["notice"])
+        self.notice_label.configure(text=view["submission_block_reason"] or view["notice"])
         self.error_label.configure(text=self.local_error or view["network_error"] or status.get("error") or preflight.get("resource_error") or "")
         age = status.get("perception", {}).get("frame_age_ms")
         remaining = status.get("remaining_ms")

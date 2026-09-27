@@ -88,7 +88,7 @@ def test_real_read_only_never_writes_even_on_stop():
     assert motor.snapshot()['stop_status'] == 'unverified'
 
 
-@pytest.mark.parametrize('percent,duration', [(20.01, 1000), (0, 1000), (True, 1000),
+@pytest.mark.parametrize('percent,duration', [(25.01, 1000), (0, 1000), (True, 1000),
     (float('nan'), 1000), (float('inf'), 1000), (5, 60001), (5, 19), (5, True), (5, 20.5)])
 def test_invalid_envelope_cannot_write(percent, duration):
     motor, wire, clock = session()
@@ -110,10 +110,10 @@ def test_readiness_and_fresh_lease_required():
 
 def test_one_exact_envelope_and_start_token_then_early_stop():
     motor, wire, clock = session()
-    start(motor, clock, 20, 60000)
+    start(motor, clock, 25, 60000)
     assert wire.commands[:2] == [
-        (ENABLE_COMMAND, [1, 1, 20, 60000, 0, 0, 0]),
-        (ALL_COMMAND, [4, 20, 60000, 1, 0, 0, 0]),
+        (ENABLE_COMMAND, [1, 1, 25, 60000, 0, 0, 0]),
+        (ALL_COMMAND, [4, 25, 60000, 1, 0, 0, 0]),
     ]
     motor.stop('capture committed')
     count = len(wire.heartbeats)

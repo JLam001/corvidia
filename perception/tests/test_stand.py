@@ -63,11 +63,20 @@ def progress(sup, clock):
                    mission_id=sup.spec.mission_id))
 
 
-@pytest.mark.parametrize("percent,duration", [(20.01, 10000), (float("nan"), 10000),
+@pytest.mark.parametrize("percent,duration", [(25.01, 10000), (float("nan"), 10000),
                                               (True, 10000), (5, 60001), (5, True), (0, 10000)])
 def test_invalid_limits_never_create_mission(percent, duration):
     with pytest.raises(ValueError):
         MissionSpec.create("red shirt", percent, duration)
+
+
+def test_fixed_profile_and_host_limit_are_exactly_25_percent():
+    from corvidia_perception.stand import MISSION_PERCENT
+    from corvidia_perception.stand_motor import MAX_PERCENT
+
+    assert MISSION_PERCENT == MAX_PERCENT == 25
+    assert MissionSpec.create("find people").percent == 25
+    assert MissionSpec.create("find people", 25, 30000).percent == 25
 
 
 def test_prepare_does_not_start_and_hardware_requires_readiness():
@@ -387,7 +396,7 @@ def test_one_step_submission_reserves_id_and_uses_only_fixed_onboard_settings():
     assert not motors[0].starts  # Admission does not perform serial work in the HTTP thread.
     sup.tick()
     assert sup.spec.mission_id == receipt['mission_id']
-    assert motors[0].starts == [(5, 60000)]
+    assert motors[0].starts == [(25, 60000)]
     assert sup.deadline == clock() + 60
     assert sup.state == 'searching'
     assert commands.get_nowait()['mission_id'] == receipt['mission_id']
@@ -395,7 +404,7 @@ def test_one_step_submission_reserves_id_and_uses_only_fixed_onboard_settings():
     assert len(motors[0].starts) == 1
 
 
-@pytest.mark.parametrize('override', [dict(percent=1), dict(percent=20), dict(duration_ms=1000),
+@pytest.mark.parametrize('override', [dict(percent=1), dict(percent=25), dict(percent=100), dict(duration_ms=1000),
                                      dict(duration_ms=60000), dict(mission_id='chosen'), dict(token=1)])
 def test_public_mission_rejects_motor_and_identity_overrides(override):
     sup, _, motors, _ = public_setup()
@@ -425,7 +434,7 @@ def test_hardware_readiness_is_required_before_reserving_mission():
                                          esc_startup_finished=True))
     sup.tick()
     assert sup.spec.mission_id == receipt['mission_id']
-    assert motors[0].starts == [(5, 60000)]
+    assert motors[0].starts == [(25, 60000)]
 
 
 def test_reserved_mission_can_be_stopped_before_the_first_tick():
@@ -449,7 +458,7 @@ def test_preparing_waits_without_motor_authority_then_starts_exactly_once():
     clock.t += 2
     ready_event(sup, clock)
     sup.tick()
-    assert sup.state == 'searching' and motors[0].starts == [(5, 60000)]
+    assert sup.state == 'searching' and motors[0].starts == [(25, 60000)]
     assert sup.spec.mission_id == receipt['mission_id'] and sup.deadline == clock() + 60
     sup.tick()
     assert len(motors[0].starts) == 1
@@ -492,7 +501,7 @@ def test_unknown_memory_headroom_blocks_preparing_until_a_sample_exists():
     sup.memory_available_mib = 2048
     sup.resource_checked_mono = clock()
     sup.tick()
-    assert sup.state == 'searching' and motors[0].starts == [(5, 60000)]
+    assert sup.state == 'searching' and motors[0].starts == [(25, 60000)]
 
 
 def test_pending_and_active_mission_reject_additional_submissions():
@@ -501,7 +510,7 @@ def test_pending_and_active_mission_reject_additional_submissions():
     with pytest.raises(ValueError): mission(sup)
     sup.tick()
     with pytest.raises(ValueError): mission(sup)
-    assert sup.spec.mission_id == first['mission_id'] and motors[0].starts == [(5, 60000)]
+    assert sup.spec.mission_id == first['mission_id'] and motors[0].starts == [(25, 60000)]
 
 
 def test_concurrent_submissions_reserve_only_one_mission():
@@ -517,7 +526,7 @@ def test_concurrent_submissions_reserve_only_one_mission():
     assert len(accepted) == 1
     sup.tick()
     assert sup.spec.mission_id == accepted[0]['mission_id']
-    assert motors[0].starts == [(5, 60000)]
+    assert motors[0].starts == [(25, 60000)]
 
 
 def test_public_mission_runs_without_client_until_fixed_timeout_and_never_restarts():
@@ -530,7 +539,7 @@ def test_public_mission_runs_without_client_until_fixed_timeout_and_never_restar
         progress(sup, clock)
         sup.tick()
     assert sup.state == 'timed_out' and sup.deadline == deadline
-    assert motors[0].starts == [(5, 60000)] and len(motors[0].stops) == 1
+    assert motors[0].starts == [(25, 60000)] and len(motors[0].stops) == 1
     sup.event(dict(type='completion', mission_id=receipt['mission_id'], result='confirmed', committed=True,
                    capture_mono=deadline-.1, commit_mono=clock(), source_epoch=0, path='/tmp/late'))
     ready_event(sup, clock)
@@ -551,7 +560,7 @@ def test_explicit_new_mission_after_completion_uses_a_new_motor_session():
     second = mission(sup)
     sup.tick()
     assert second['mission_id'] != first['mission_id'] and len(motors) == 2
-    assert motors[0].starts == [(5, 60000)] and motors[1].starts == [(5, 60000)]
+    assert motors[0].starts == [(25, 60000)] and motors[1].starts == [(25, 60000)]
     assert sup.state == 'searching'
 
 
@@ -613,7 +622,7 @@ def test_resource_and_read_only_telemetry_gates_never_renew_motor_lease():
     sup.resource_error = None
     ready_event(sup, clock)
     sup.tick()
-    assert sup.state == 'searching' and motors[0].starts == [(5, 60000)]
+    assert sup.state == 'searching' and motors[0].starts == [(25, 60000)]
     assert not observer.starts and observer.refreshes == 0
 
 
@@ -634,7 +643,7 @@ def test_preflight_stall_cannot_start_from_frames_that_became_stale():
     assert motors[0].refreshes == 0
     ready_event(sup, clock)
     sup.tick()
-    assert sup.state == 'searching' and motors[0].starts == [(5, 60000)]
+    assert sup.state == 'searching' and motors[0].starts == [(25, 60000)]
 
 
 def test_stop_for_wrong_id_cannot_cancel_pending_or_active_mission():
@@ -647,4 +656,4 @@ def test_stop_for_wrong_id_cannot_cancel_pending_or_active_mission():
         sup.submit(dict(action='stop', mission_id='stale-mission'))
     sup.tick()
     assert sup.state == 'searching' and sup.spec.mission_id == receipt['mission_id']
-    assert motors[0].starts == [(5, 60000)] and not motors[0].stops
+    assert motors[0].starts == [(25, 60000)] and not motors[0].stops

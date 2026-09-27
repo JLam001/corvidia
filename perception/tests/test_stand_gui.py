@@ -112,6 +112,31 @@ def test_service_mode_version_authority_and_state_must_be_known(override):
     assert not api.posts
 
 
+@pytest.mark.parametrize("mode", ["observe", "hardware"])
+def test_finished_one_shot_motor_session_does_not_block_another_mission(mode):
+    control, api = controller(mode)
+    api.state.update(state="complete", mission_id="previous",
+                     motor={"ready": False, "stop_status": "verified", "zero_confirmed": True})
+    control.poll_once()
+    assert control.snapshot()["can_submit"]
+    flags = {name: True for name, _ in gui.READINESS} if mode == "hardware" else None
+    control.submit("Find people", flags)
+    control.process_command_once()
+    assert len(api.posts) == 1
+
+
+def test_mode_mismatch_on_terminal_mission_keeps_disabled_reason_visible():
+    control, api = controller()
+    api.state.update(mode="hardware", state="complete", mission_id="previous",
+                     motor={"stop_status": "verified", "zero_confirmed": True})
+    control.poll_once()
+    view = control.snapshot()
+    assert not view["can_submit"]
+    assert "expects observe" in view["notice"]
+    assert "service is hardware" in view["submission_block_reason"]
+    assert "Reopen" in view["submission_block_reason"]
+
+
 def test_stale_status_disables_submission_but_not_explicit_abort():
     now = [100.]
     control, api = controller(clock=lambda: now[0])
@@ -345,6 +370,35 @@ def test_controller_and_actual_http_boundary_share_singlemission_contract():
         server.close()
 
 
+def test_stale_operator_session_is_definitively_rejected_without_retries():
+    fake = Api()
+    events = []
+    server = StandWebServer(port=0, status_fn=fake.status,
+                            command_fn=lambda event: events.append(event),
+                            preview_fn=lambda: b"preview")
+    control = gui.ConsoleController(
+        ApiClient(Session(f"http://127.0.0.1:{server.port}", "old-session-token")), start=False)
+    try:
+        control.poll_once()  # Public status alone cannot authenticate commands.
+        assert control.snapshot()["can_submit"]
+        control.submit("Find people")
+        assert control.process_command_once()
+        for _ in range(3):
+            control.poll_once()
+            assert not control.process_command_once()
+        view = control.snapshot()
+        assert view["connected"] and not view["can_submit"]
+        assert not view["pending"] and not view["uncertain"]
+        assert "Operator session rejected" in view["submission_block_reason"]
+        assert "Reopen" in view["submission_block_reason"]
+        assert not events and fake.state["state"] == "idle"
+        with pytest.raises(ValueError, match="Operator session rejected"):
+            control.submit("Find people")
+    finally:
+        control.close()
+        server.close()
+
+
 def test_missing_desktop_display_produces_useful_error_and_no_mutation(monkeypatch, capsys):
     api = Api()
     monkeypatch.setattr(gui, "load_session", lambda _path: object())
@@ -423,6 +477,37 @@ def test_enter_requires_same_hardware_readiness_and_valid_description_as_button(
     window.input.bindings["<Return>"](None)
     assert window.controller.process_command_once()
     assert api.posts == [("mission", {"appearance": "blue polo", "readiness": flags})]
+
+
+def test_button_validation_error_survives_status_polling_and_requires_a_new_submit():
+    window, api, observations = prompt_window("blue polo and glasses")
+    window.submit()
+    assert "not supported" in window.local_error
+    error = window.local_error
+    for _ in range(3):
+        window.controller.poll_once()
+    assert window.local_error == error
+    assert observations == [] and api.posts == []
+    window.input.value = "Find people"
+    window.submit()
+    assert window.local_error == ""
+    assert window.controller.process_command_once()
+    assert api.posts == [("mission", {"appearance": "Find people"})]
+
+
+@pytest.mark.parametrize("action", ["button", "enter"])
+def test_user_timed_prompt_submits_once_from_button_and_enter(action):
+    brief = "Find as many people in 30 seconds"
+    window, api, observations = prompt_window(brief)
+    for _ in range(2):
+        if action == "button":
+            window.submit()
+        else:
+            assert window.input.bindings["<Return>"](None) == "break"
+    assert window.controller.process_command_once()
+    assert not window.controller.process_command_once()
+    assert api.posts == [("mission", {"appearance": brief})]
+    assert observations == []
 
 
 def live_telemetry():

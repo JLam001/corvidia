@@ -34,7 +34,7 @@ class ParsedMissionPrompt:
 
 
 _ACTIONS = r"(?:find|locate|detect|search for|look for|photograph|capture)"
-_TIMED_SUFFIX = re.compile(r"^(.+) (within|for) ([0-9]+)\s*(?:seconds?|secs?|s)$")
+_TIMED_SUFFIX = re.compile(r"^(.+) (within|for|in) ([0-9]+)\s*(?:seconds?|secs?|s)$")
 _MANY = re.compile(r"^(?:please )?" + _ACTIONS + r" as many (people|humans)(.*)$")
 _PLURAL = re.compile(r"^(?:please )?" + _ACTIONS + r" (people|humans)(?: .+)?$")
 _TIMING_HELP = (
@@ -53,8 +53,8 @@ def _requirements(appearance: str) -> AppearanceRequirements:
 def parse_mission_prompt(raw) -> ParsedMissionPrompt:
     """Return explicit completion semantics and compiled appearance requirements.
 
-    Supported timed forms are ``find as many people [wearing ...] as possible
-    within/for N seconds`` and ``find people [wearing ...] for N seconds``.
+    Supported timed forms are ``find as many people [wearing ...] [as possible]
+    within/for/in N seconds`` and ``find people [wearing ...] for N seconds``.
     Clothing may also follow ``as possible``. ``N`` must be a whole number from
     1 through 60; ``s``, ``sec``, and ``secs`` are accepted unit abbreviations.
     A bare ``within`` deadline is intentionally rejected because it does not
@@ -71,6 +71,8 @@ def parse_mission_prompt(raw) -> ParsedMissionPrompt:
         text = text[:-1].rstrip()
     timed = _TIMED_SUFFIX.fullmatch(text)
     if timed is None:
+        if _MANY.fullmatch(text):
+            raise MissionPromptValidationError(_TIMING_HELP)
         return ParsedMissionPrompt(
             prompt, prompt, _requirements(prompt), "first_match", DEFAULT_DURATION_MS,
         )
@@ -86,8 +88,8 @@ def parse_mission_prompt(raw) -> ParsedMissionPrompt:
             clothing = clothing[len(" as possible"):]
         elif clothing.endswith(" as possible"):
             clothing = clothing[:-len(" as possible")]
-        else:
-            raise MissionPromptValidationError(_TIMING_HELP)
+        # "As many" already states collection intent; "as possible" is optional.
+        # Every other word remains part of the strict appearance validation.
         appearance = subject + clothing
     elif relation == "for" and _PLURAL.fullmatch(body):
         appearance = body

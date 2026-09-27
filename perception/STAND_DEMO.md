@@ -105,6 +105,7 @@ The mission brief selects one of two completion modes:
 | --- | --- |
 | `find people` | Stop after the first confirmed, saved match; search for at most 60 seconds. |
 | `find as many people as possible within 30 seconds` | Keep searching and saving confirmed matches for 30 seconds, then stop. |
+| `find as many people in 30 seconds` | The same 30-second collection; “as possible” is optional. |
 | `find people for 30 seconds` | The same 30-second collection. |
 | `find people wearing a blue polo for 30 seconds` | Collect only confirmed matches for every requested clothing trait. |
 
@@ -148,14 +149,16 @@ simulated. Use `--mode telemetry --port /dev/serial/by-id/DEVICE` for the dedica
 read-only check. Hardware commissioning uses a separately launched `--mode hardware`
 service with that serial path.
 
-The onboard demo profile is fixed internally at **5% equal motor input** and a
+The onboard demo profile is fixed internally at **25% equal motor input** and a
 **60-second maximum**. Ordinary searches stop after their first matching saved
 capture. An explicit timed brief chooses a collection duration from 1–60 seconds.
 User interfaces and mission packets accept the brief and hardware readiness
 observations; they accept no raw power or duration overrides. The model cannot
 change motor input, extend a run, or authorize a new mission. Percentage is
 requested input, not measured RPM or electrical power.
-The installed v5 firmware remains unchanged.
+The host motor adapter also caps requested input at 25%. The installed v5
+firmware remains unchanged; its broader bench-test envelope does not override
+the mission profile or the host cap.
 
 ## Connection and deployment
 
