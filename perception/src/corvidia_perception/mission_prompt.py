@@ -1,6 +1,6 @@
 """Compile a mission brief without discarding clothing or timing constraints.
 
-Ordinary descriptions stop at the first match, with a 60-second search limit.
+Ordinary descriptions stop at the first match and search until the operator aborts.
 Explicit collection requests continue saving matches for a bounded duration.
 Only the collection wrapper is removed; the entire remaining description must
 pass the same strict appearance grammar used by ordinary missions.
@@ -16,7 +16,7 @@ import unicodedata
 from .appearance import AppearanceRequirements, AppearanceValidationError, compile_appearance
 
 
-DEFAULT_DURATION_MS = 60_000
+DEFAULT_DURATION_MS = None  # no mission deadline; the operator aborts
 MAX_DURATION_MS = 60_000
 
 
@@ -30,7 +30,7 @@ class ParsedMissionPrompt:
     appearance: str
     requirements: AppearanceRequirements
     completion_mode: Literal["first_match", "timed_collection"]
-    duration_ms: int
+    duration_ms: int | None
 
 
 _ACTIONS = r"(?:find|locate|detect|search for|look for|photograph|capture)"

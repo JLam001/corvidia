@@ -11,6 +11,7 @@ import dataclasses
 import math
 import queue
 import re
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -121,6 +122,55 @@ def _begin_values(command: dict) -> tuple[str, str, float, dict]:
     return mission_id, appearance, float(started), dict(extra)
 
 
+# Minimum spacing between previews. Well under the 33 ms camera period so
+# processing jitter never skips a frame; the encoder keeps only the newest.
+PREVIEW_INTERVAL_S = 1 / 60
+PREVIEW_QUALITY = 80
+
+
+class PreviewEncoder:
+    """Draw and JPEG-encode previews on their own thread, keeping only the newest.
+
+    Encoding a 1280x720 preview costs ~8 ms on the Orin, a quarter of a 30 fps
+    frame budget, so it must not run on the detection loop. ``render(job)``
+    returns JPEG bytes or None. Previews are disposable: failures are dropped.
+    """
+
+    def __init__(self, output, render):
+        self._output, self._render = output, render
+        self._ready = threading.Condition()
+        self._job = None
+        self._closed = False
+        self._thread = threading.Thread(target=self._run, name="stand-preview", daemon=True)
+        self._thread.start()
+
+    def submit(self, job) -> None:
+        with self._ready:
+            self._job = job  # an unencoded older job is simply replaced
+            self._ready.notify()
+
+    def _run(self) -> None:
+        while True:
+            with self._ready:
+                while self._job is None and not self._closed:
+                    self._ready.wait()
+                if self._closed:
+                    return
+                job, self._job = self._job, None
+            try:
+                data = self._render(job)
+            except Exception:
+                continue
+            if data:
+                _latest_preview(self._output, data)
+
+    def close(self) -> None:
+        with self._ready:
+            self._closed = True
+            self._ready.notify()
+        self._thread.join(1.0)
+
+
 def _stand_pipeline_config(model: str, root: Path):
     from .config import PipelineConfig
 
@@ -149,7 +199,7 @@ def perception_worker(control_queue, event_queue, preview_queue, configdict: dic
     Preview queue carries JPEG bytes and should have capacity one.
     """
     sink = EventSink(event_queue)
-    source = detector = pipe = backend = None
+    source = detector = pipe = backend = encoder = None
     mission_id = None
     try:
         # Do not move these imports to module scope: the serial supervisor must
@@ -190,6 +240,14 @@ def perception_worker(control_queue, event_queue, preview_queue, configdict: dic
         started = None
         guide = None
         last_preview = 0.0
+
+        def render_preview(job):
+            frame, detections, labels, lines = job
+            image = annotate(PreviewState(frame, detections, labels, lines), max_width=frame.image.shape[1])
+            ok, data = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, PREVIEW_QUALITY])
+            return data.tobytes() if ok else None
+
+        encoder = PreviewEncoder(preview_queue, render_preview) if preview_queue is not None else None
         shutdown = False
         seen_missions: set[str] = set()
 
@@ -307,22 +365,21 @@ def perception_worker(control_queue, event_queue, preview_queue, configdict: dic
                        "capture_quality": frame.info.capture_quality, "guidance": guidance})
             if sink.failed.is_set():
                 break
-            if preview_queue is not None and processed - last_preview >= 0.2:
+            if encoder is not None and processed - last_preview >= PREVIEW_INTERVAL_S:
                 labels = ({key.track_id: state.phase.value for key, state in list(pipe.gate.tracks.items())}
                           if pipe is not None else {})
-                preview = annotate(PreviewState(frame, detections, labels, [
+                encoder.submit((frame, list(detections), labels, [
                     f"Stand demo: {guidance.replace('_', ' ').upper()}",
                     "Manual turn cues only; stay within stand travel.",
                 ]))
-                ok, data = cv2.imencode(".jpg", preview, [cv2.IMWRITE_JPEG_QUALITY, 70])
-                if ok:
-                    _latest_preview(preview_queue, data.tobytes())
                 last_preview = processed
     except Exception as exc:  # worker failures must reach the independent supervisor
         sink.send({"type": "fault", "mission_id": mission_id,
                    "reason": f"{type(exc).__name__}: {exc}", "mono": time.monotonic()})
     finally:
         # Stop motors is the parent's job and must precede waiting for this cleanup.
+        if encoder is not None:
+            encoder.close()
         if pipe is not None:
             try:
                 pipe.stop()

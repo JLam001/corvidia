@@ -250,7 +250,7 @@ def test_evidence_uses_authenticated_shared_api_and_zero_does_not_claim_physical
     api.state.update(state="complete", mission_id="saved", evidence_available=True,
                      motor={"stop_status": "verified", "zero_confirmed": True})
     control.poll_once()
-    assert ("/frame.jpg", False) in api.images
+    assert ("/frame.jpg", False) not in api.images  # previews have their own 30 Hz thread
     assert ("/api/evidence?mission_id=saved", True) in api.images
     view = control.snapshot()
     assert view["evidence"] == b"jpeg-capture" and view["evidence_id"] == "saved"
@@ -362,7 +362,7 @@ def test_controller_and_actual_http_boundary_share_singlemission_contract():
         control.poll_once()
         assert events == [{"action": "mission", "appearance": "person wearing a red shirt", "readiness": {}}]
         assert control.snapshot()["mission_id"] == "mission-1"
-        assert control.snapshot()["frame"] == b"preview"
+        assert control.poll_frame_once() and control.snapshot()["frame"] == b"preview"
         control.close()
         assert fake.state["state"] == "searching" and len(events) == 1
     finally:
@@ -645,3 +645,186 @@ def test_normal_collection_completion_keeps_abort_error_and_footer_visible_with_
                 parent = parent.master
     finally:
         window.close()
+
+
+def test_frame_poll_prepares_changed_previews_only_and_survives_prepare_errors():
+    control, api = controller()
+    prepared = []
+    control.frame_prepare = lambda data: prepared.append(data) or ("bounds", data.upper())
+    assert control.poll_frame_once()
+    assert control.preview() == (1, b"jpeg-preview", ("bounds", b"JPEG-PREVIEW"))
+    assert not control.poll_frame_once() and prepared == [b"jpeg-preview"]  # unchanged frame is skipped
+    control.frame = None
+    control.frame_prepare = lambda data: 1 / 0
+    assert control.poll_frame_once()
+    assert control.preview() == (2, b"jpeg-preview", None)  # window decodes the JPEG itself
+
+
+@pytest.mark.parametrize("use_cv2", [True, False])
+def test_fit_image_scales_within_bounds_with_or_without_opencv(monkeypatch, use_cv2):
+    import io
+    from PIL import Image
+    if not use_cv2:
+        monkeypatch.setattr(gui, "_CV2", [None])
+    buffer = io.BytesIO()
+    Image.new("RGB", (1280, 720), (200, 30, 40)).save(buffer, "JPEG")
+    data = buffer.getvalue()
+    assert gui.fit_image(data, (640, 640)).size == (640, 360)
+    assert gui.fit_image(data, (2000, 2000)).size == (1280, 720)  # never enlarged by default
+    enlarged = gui.fit_image(data, (1600, 1000), enlarge=True)
+    assert enlarged.size == (1600, 900) and enlarged.mode == "RGB"
+    red, green, blue = enlarged.getpixel((800, 450))
+    assert red > 150 and green < 80 and blue < 80  # colour order survives OpenCV's BGR
+
+
+def test_fit_image_rejects_oversized_images_before_decoding():
+    import io
+    from PIL import Image
+    buffer = io.BytesIO()
+    Image.new("RGB", (5000, 10), "white").save(buffer, "PNG")
+    with pytest.raises(ValueError, match="limits"):
+        gui.fit_image(buffer.getvalue(), (100, 100))
+
+
+def test_corner_only_rounding_matches_full_composite():
+    import numpy as np
+    from PIL import Image
+    from corvidia_perception.stand_widgets import round_corners, round_corners_array
+    rng = np.random.default_rng(1)
+    array = rng.integers(0, 256, (90, 160, 3), dtype=np.uint8)
+    expected = np.asarray(round_corners(Image.fromarray(array), 14, "#0f1317")).astype(int)
+    actual = round_corners_array(array.copy(), 14, "#0f1317").astype(int)
+    assert np.abs(actual - expected).max() <= 1
+    assert np.array_equal(actual[14:-14], array[14:-14])  # interior untouched
+
+
+def _imu_status(**imu):
+    return {"telemetry_mode": "live_read_only", "imu": {"IMU_OK": 1, **imu},
+            "preflight": {"telemetry_connected": True, "telemetry_rx_age_ms": 20.0}}
+
+
+def _quaternion(axis, degrees):
+    half = math.radians(degrees) / 2
+    q = [math.cos(half), 0.0, 0.0, 0.0]
+    q[1 + "xyz".index(axis)] = math.sin(half)
+    return dict(zip(("q1", "q2", "q3", "q4"), q))
+
+
+@pytest.mark.parametrize("axis,degrees,expected", [
+    # Measured mount (imu-alignment README): right side lowered read as -X,
+    # nose raised as +Y and turning right as -Z in the sensor frame.
+    ("x", -20, (20, 0, 0)), ("y", 20, (0, 20, 0)), ("z", -30, (0, 0, 30)),
+])
+def test_body_attitude_applies_measured_sensor_axis_signs(axis, degrees, expected):
+    from_quaternion = gui.body_attitude(_imu_status(ATTITUDE_QUATERNION=_quaternion(axis, degrees)))
+    euler = {"roll": 0.0, "pitch": 0.0, "yaw": 0.0}
+    euler[{"x": "roll", "y": "pitch", "z": "yaw"}[axis]] = math.radians(degrees)
+    from_euler = gui.body_attitude(_imu_status(ATTITUDE=euler))
+    for result in (from_quaternion, from_euler):
+        assert [round(math.degrees(v), 6) for v in result] == pytest.approx(expected, abs=1e-6)
+
+
+def test_body_attitude_combined_tilt_matches_between_quaternion_and_euler():
+    roll, pitch, yaw = math.radians(12), math.radians(-7), math.radians(40)
+    cr, sr, cp, sp, cy, sy = (math.cos(roll / 2), math.sin(roll / 2), math.cos(pitch / 2),
+                              math.sin(pitch / 2), math.cos(yaw / 2), math.sin(yaw / 2))
+    q = {"q1": cr * cp * cy + sr * sp * sy, "q2": sr * cp * cy - cr * sp * sy,
+         "q3": cr * sp * cy + sr * cp * sy, "q4": cr * cp * sy - sr * sp * cy}
+    a = gui.body_attitude(_imu_status(ATTITUDE_QUATERNION=q))
+    b = gui.body_attitude(_imu_status(ATTITUDE={"roll": roll, "pitch": pitch, "yaw": yaw}))
+    assert a == pytest.approx(b, abs=1e-9)
+
+
+@pytest.mark.parametrize("change", [
+    lambda s: s["imu"].update(IMU_OK=0),
+    lambda s: s["preflight"].update(telemetry_rx_age_ms=2000.0),
+    lambda s: s["imu"].update(ATTITUDE={"roll": float("nan"), "pitch": 0.0, "yaw": 0.0}),
+    lambda s: s["imu"].pop("ATTITUDE"),
+])
+def test_body_attitude_is_absent_rather_than_level_when_data_is_not_trustworthy(change):
+    status = _imu_status(ATTITUDE={"roll": 0.0, "pitch": 0.0, "yaw": 0.0})
+    change(status)
+    assert gui.body_attitude(status) is None
+    assert gui.body_attitude(_imu_status(ATTITUDE={"roll": 0.0, "pitch": 0.0, "yaw": 0.0}),
+                             connected=False) is None
+
+
+def test_tilt_text_reads_like_the_stand():
+    assert gui.tilt_text(None) == "No attitude data"
+    assert gui.tilt_text((0.001, -0.002, 1.0)) == "Level"
+    assert gui.tilt_text((math.radians(-3.3), math.radians(-3.4), 0)) == "Left side down 3° · Nose down 3°"
+    assert gui.tilt_text((math.radians(12), math.radians(20), 0)) == "Right side down 12° · Nose up 20°"
+
+
+def test_attitude_render_is_sized_and_greys_out_without_data():
+    from corvidia_perception.stand_widgets import render_attitude
+    colors = dict(ground="#161b21", level="#2b343e", arm="#c3ccd4", motor="#1e252d",
+                  rim="#8793a0", nose="#ff7a1f", off="#8793a0")
+    live = render_attitude((0.2, 0.1, 0), (160, 90), colors)
+    idle = render_attitude(None, (160, 90), colors)
+    assert live.size == idle.size == (160, 90)
+    import numpy as np
+
+    def orange(image):
+        r, g, b = np.asarray(image).astype(int).transpose(2, 0, 1)
+        return int(((r > 200) & (g > 90) & (g < 150) & (b < 80)).sum())
+    assert orange(live) > 20 and orange(idle) == 0
+
+
+def _view(**status):
+    base = {"status": {"state": "idle", **status}, "connected": True, "pending": False, "uncertain": False,
+            "mission_id": status.get("mission_id"), "notice": "", "submission_block_reason": None}
+    return base
+
+
+@pytest.mark.parametrize("status,pending,step", [
+    ({}, False, 0), ({}, True, 2), ({"state": "searching", "mission_id": "m"}, False, 2),
+    ({"state": "complete", "mission_id": "m"}, False, 3), ({"state": "failed", "mission_id": "m"}, False, 3),
+])
+def test_current_step_follows_the_search(status, pending, step):
+    view = _view(**status)
+    view["pending"] = pending
+    assert gui.current_step(view) == step
+
+
+def test_banner_gives_one_plain_instruction_for_each_moment():
+    banner = lambda view, **kw: gui.plain_banner(view, **{"entered": False, "valid": None, "hardware": True, **kw})
+    assert banner(_view())[1] == "Ready when you are"
+    assert banner(_view(), entered=True, valid=True)[2].startswith("Press Start search. You'll confirm five")
+    assert "practice mode" in banner(_view(), entered=True, valid=True, hardware=False)[2]
+    icon, headline, detail, tone = banner(_view(state="searching", mission_id="m", guidance="search_right",
+                                                prompt="a person wearing a red shirt"))
+    assert (icon, headline, tone) == ("→", "Turn the stand slowly to the right", "turn")
+    assert "“a person wearing a red shirt”" in detail and "Stop search" in detail
+    assert banner(_view(state="searching", mission_id="m", guidance="hold"))[1] == "Hold the stand still"
+    assert banner(_view(state="confirming", mission_id="m"))[1] == "Checking a possible match"
+
+
+def test_banner_after_a_hardware_search_reminds_to_check_the_motors():
+    done = gui.plain_banner(_view(state="complete", mission_id="m"), entered=True, valid=True, hardware=True)
+    assert done[1] == "Found a match" and "make sure the motors have stopped" in done[2]
+    practice = gui.plain_banner(_view(state="complete", mission_id="m"), entered=True, valid=True, hardware=False)
+    assert "motors" not in practice[2]
+    failed = gui.plain_banner(_view(state="failed", mission_id="m", error="camera or detector progress stale"),
+                              entered=True, valid=True, hardware=True)
+    assert failed[1] == "Something went wrong" and "camera or detector progress stale" in failed[2]
+
+
+def test_banner_safety_states_outrank_everything_else():
+    lost = _view(state="searching", mission_id="m")
+    lost["connected"] = False
+    assert gui.plain_banner(lost, entered=True, valid=True, hardware=True)[1] == "Lost connection to the drone"
+    stuck = _view(state="failed", mission_id="m", recovery_required=True)
+    icon, headline, detail, tone = gui.plain_banner(stuck, entered=True, valid=True, hardware=True)
+    assert headline == "Check that the motors have stopped" and "power switch" in detail and tone == "bad"
+
+
+def test_health_summary_names_the_most_important_problem_first():
+    status = live_telemetry()
+    status["preflight"].update(minimum_memory_mib=1536)
+    status["motor"]["zero_confirmed"] = True
+    assert gui.plain_health(status, connected=True, memory=1800.0) == ("good", "Everything is working")
+    assert gui.plain_health(status, connected=True, memory=1200.0)[1] == "The drone's computer is low on memory"
+    assert gui.plain_health(status, connected=False, memory=1800.0) == ("bad", "Can't reach the drone")
+    status["motor"].update(zero_confirmed=False, stop_status="unverified", stop_reason="operator stop")
+    assert gui.plain_health(status, connected=True, memory=1200.0) == ("bad", "Motors may still be spinning")

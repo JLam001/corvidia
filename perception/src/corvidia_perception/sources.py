@@ -160,16 +160,29 @@ SENSOR_MODES = {0: (3840, 2160), 1: (1920, 1080)}
 def argus_pipeline(sensor_id: int = 0, sensor_mode: int = 1,
                    output_size: tuple[int, int] = (1920, 1080), fps: int = 30,
                    flip: int = 0) -> str:
-    """Argus capture, VIC scaling (nvvidconv), BGR frames into an appsink named `sink`."""
+    """Argus capture, VIC scaling (nvvidconv), BGRx frames into an appsink named `sink`.
+
+    VIC cannot emit 3-channel BGR. GstCapture drops the pad byte while making its
+    one copy out of the GStreamer buffer, so no CPU videoconvert pass is needed.
+    """
     cw, ch = SENSOR_MODES[sensor_mode]
     ow, oh = output_size
     return (
         f"nvarguscamerasrc sensor-id={sensor_id} sensor-mode={sensor_mode} ! "
         f"video/x-raw(memory:NVMM),width={cw},height={ch},framerate={fps}/1 ! "
         f"nvvidconv flip-method={flip} ! video/x-raw,width={ow},height={oh},format=BGRx ! "
-        "videoconvert ! video/x-raw,format=BGR ! "
         "appsink name=sink max-buffers=1 drop=true sync=false"
     )
+
+
+def bgr_from_buffer(data, width: int, height: int, fmt: str) -> np.ndarray:
+    """Copy a packed BGR or BGRx buffer into a new contiguous BGR image."""
+    if fmt == "BGR":
+        return np.frombuffer(data, np.uint8, count=width * height * 3).reshape(height, width, 3).copy()
+    if fmt == "BGRx":
+        packed = np.frombuffer(data, np.uint8, count=width * height * 4).reshape(height, width, 4)
+        return _cv2().cvtColor(packed, _cv2().COLOR_BGRA2BGR)
+    raise ValueError(f"unsupported capture format {fmt!r}; expected BGR or BGRx")
 
 
 class GstCapture:
@@ -204,13 +217,13 @@ class GstCapture:
         if sample is None:
             return False, None, None
         caps = sample.get_caps().get_structure(0)
-        w, h = caps.get_value("width"), caps.get_value("height")
+        w, h, fmt = caps.get_value("width"), caps.get_value("height"), caps.get_value("format")
         buf = sample.get_buffer()
         ok, info = buf.map(Gst.MapFlags.READ)
         if not ok:
             return False, None, None
         try:
-            image = np.frombuffer(info.data, np.uint8, count=w * h * 3).reshape(h, w, 3).copy()
+            image = bgr_from_buffer(info.data, w, h, fmt)
         finally:
             buf.unmap(info)
         capture = None

@@ -31,7 +31,7 @@ def test_existing_requests_keep_first_match_behavior_and_full_appearance(text):
     assert parsed.prompt == parsed.appearance == text
     assert parsed.requirements == compile_appearance(text)
     assert parsed.completion_mode == "first_match"
-    assert parsed.duration_ms == DEFAULT_DURATION_MS == MAX_DURATION_MS == 60_000
+    assert parsed.duration_ms is DEFAULT_DURATION_MS is None and MAX_DURATION_MS == 60_000
 
 
 @pytest.mark.parametrize("text,seconds", [

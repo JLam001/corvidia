@@ -175,9 +175,9 @@ def test_saved_image_is_available_during_collection_and_indexed_on_disk(tmp_path
     assert result["capture_count"] == len(result["captures"]) == 2
 
 
-def test_ordinary_brief_keeps_first_match_and_default_limit():
+def test_ordinary_brief_keeps_first_match_without_a_deadline():
     spec = MissionSpec.create("find people")
-    assert spec.completion_mode == "first_match" and spec.duration_ms == 60000
+    assert spec.completion_mode == "first_match" and spec.duration_ms is None
 
 
 def test_private_duration_cannot_conflict_with_timed_brief():

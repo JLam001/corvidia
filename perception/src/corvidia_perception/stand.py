@@ -27,7 +27,10 @@ from .stand_motor import MAX_PERCENT
 ACTIVE = {"starting", "searching", "confirming", "saving"}
 TERMINAL = {"complete", "failed", "timed_out", "cancelled"}
 MISSION_PERCENT = 5.0
-MISSION_DURATION_MS = 60_000
+# One firmware motor run is at most 60 s. Missions without a deadline chain
+# fresh one-shot runs; each ends with a verified zero before the next starts.
+MOTOR_RUN_MS = 60_000
+REARM_TIMEOUT_S = {"stopping": 3.0, "reconnecting": 10.0, "starting": 3.0}
 PREPARING_TIMEOUT_S = 15.0
 READINESS = {"guarded_stand", "hands_clear", "power_disconnect_accessible", "motors_still", "esc_startup_finished"}
 
@@ -38,7 +41,7 @@ class MissionSpec:
     appearance: str
     requirements: AppearanceRequirements
     percent: float = MISSION_PERCENT
-    duration_ms: int = MISSION_DURATION_MS
+    duration_ms: int | None = None  # None: search until a match or operator abort
     completion_mode: str = "first_match"
     prompt: str = ""
 
@@ -53,7 +56,9 @@ class MissionSpec:
             raise ValueError("Motor input must be a finite number")
         if not 0 < percent <= MAX_PERCENT:
             raise ValueError(f"Stand input must be greater than zero and at most {MAX_PERCENT:g}%")
-        if type(duration_ms) is not int or not 1000 <= duration_ms <= 60_000:
+        if parsed.completion_mode == "timed_collection" and duration_ms is None:
+            raise ValueError("Timed collections need a duration")
+        if duration_ms is not None and (type(duration_ms) is not int or not 1000 <= duration_ms <= MOTOR_RUN_MS):
             raise ValueError("Duration must be 1,000–60,000 integer milliseconds")
         return cls(uuid.uuid4().hex, parsed.appearance, parsed.requirements, float(percent),
                    duration_ms, parsed.completion_mode, parsed.prompt)
@@ -139,6 +144,8 @@ class StandSupervisor:
         self.source_epoch = None
         self.last_capture = self.last_processed = None
         self.started_mono = self.deadline = self.stopping_mono = None
+        self.rearm = self.rearm_started = None
+        self.zero_verified_between_runs = False
         self.stage = None
         self.stage_started = None
         self.pending_terminal = None
@@ -243,6 +250,8 @@ class StandSupervisor:
             message.get("duration_ms"))
         self.state, self.error, self.guidance = "prepared", None, "hold"
         self.started_mono = self.deadline = self.stopping_mono = None
+        self.rearm = self.rearm_started = None
+        self.zero_verified_between_runs = False
         self.stage = self.stage_started = self.pending_terminal = None
         self.evidence = self.result_path = self.result = None
         self.captures = []
@@ -284,10 +293,12 @@ class StandSupervisor:
                     raise ValueError("mission preflight deadline expired")
                 if not self._fresh(now):
                     raise ValueError("Waiting for fresh camera and detector progress")
-                self.started_mono, self.deadline = now, now + self.spec.duration_ms / 1000
+                duration = self.spec.duration_ms
+                self.started_mono = now
+                self.deadline = math.inf if duration is None else now + duration / 1000
                 self.state, self.error = "starting", None
                 self.motor.refresh_lease()
-                self.motor.start_all(self.spec.percent, self.spec.duration_ms)
+                self.motor.start_all(self.spec.percent, duration or MOTOR_RUN_MS)
         if cancelled:
             self._stop("operator stop", "cancelled")
             return
@@ -307,6 +318,9 @@ class StandSupervisor:
             return
         # Revoke motor authority before any queue, file, model or HTTP operation.
         self.motor.stop(reason)
+        # Between chained runs the previous run's zero is already verified and the
+        # fresh session has commanded nothing, so its stop need not be re-verified.
+        self.zero_verified_between_runs = self.rearm == "reconnecting"
         self.perception_ready = False  # Require a new ready after model cleanup.
         self.state, self.pending_terminal = "stopping", terminal
         self.error = None if terminal == "complete" else reason
@@ -338,6 +352,8 @@ class StandSupervisor:
             return self.stage + " deadline exceeded", "failed"
         if self.state == "starting" and now - self.started_mono > 3:
             return "motor start acknowledgement timed out", "failed"
+        if self.rearm and now - self.rearm_started > REARM_TIMEOUT_S[self.rearm]:
+            return f"motor re-arm {self.rearm} timed out", "failed"
         if now >= self.deadline:
             return self._deadline_outcome()
         return None
@@ -492,6 +508,11 @@ class StandSupervisor:
                 self._stop(*failure)
             else:
                 self.motor.refresh_lease()
+                if self.spec.duration_ms is None and self.state != "starting":
+                    try:
+                        self._chain_motor_run(now, motor)
+                    except (ValueError, RuntimeError) as exc:
+                        self._stop(f"motor re-arm failed: {exc}", "failed")
                 if self.state == "starting" and motor.get("start_status") == "accepted":
                     self.state = "searching"
                     self._audit("start_accepted", motor=motor)
@@ -503,7 +524,8 @@ class StandSupervisor:
             motor = self.motor.snapshot()
             if self.pending_terminal == "complete" and (motor.get("fault") or motor.get("error")):
                 self.pending_terminal, self.error = "failed", str(motor.get("error") or motor.get("fault"))
-            if motor.get("stop_status") == "verified" and motor.get("zero_confirmed"):
+            if (motor.get("stop_status") == "verified" and motor.get("zero_confirmed")) or \
+                    self.zero_verified_between_runs:
                 self.state = self.pending_terminal
                 self._audit("zero_input_confirmed", motor=motor, evidence=self.evidence)
             elif motor.get("stop_status") == "unverified" or now - self.stopping_mono > 2:
@@ -519,6 +541,38 @@ class StandSupervisor:
                 self._audit("mission_result", result=self.result)
         self._publish()
 
+    def _chain_motor_run(self, now, motor):
+        """Replace a cleanly expired motor run with a fresh one-shot session.
+
+        Only a host-deadline expiry is chained; any fault or operator stop ends
+        the mission through _stop. Each stage is bounded by REARM_TIMEOUT_S.
+        """
+        if self.rearm is None:
+            if motor.get("stop_reason") != "duration expired":
+                return
+            self.rearm, self.rearm_started = "stopping", now
+            self._audit("motor_run_expired", motor=motor)
+        if self.rearm == "stopping":
+            # The worker closes the exclusive serial port after verifying zero.
+            if not (motor.get("stop_status") == "verified" and motor.get("zero_confirmed")
+                    and not motor.get("connected")):
+                return
+            self._audit("motor_run_zero_confirmed", motor=motor)
+            self.motor.close()
+            self.motor = self.motor_factory()
+            self.motor.start_background()
+            self.rearm, self.rearm_started = "reconnecting", now
+        elif self.rearm == "reconnecting":
+            if not motor.get("ready"):
+                return
+            self.motor.refresh_lease()
+            self.motor.start_all(self.spec.percent, MOTOR_RUN_MS)
+            self.rearm, self.rearm_started = "starting", now
+            self._audit("motor_run_rearm_requested")
+        elif self.rearm == "starting" and motor.get("start_status") == "accepted":
+            self.rearm = self.rearm_started = None
+            self._audit("motor_run_restarted", motor=motor)
+
     def _publish(self):
         now = self.clock()
         motor = self.motor.snapshot()
@@ -532,8 +586,10 @@ class StandSupervisor:
                   "operator": "jetson", "mission_owner": "jetson", "control_authority": "onboard",
                   "error": self.error, "guidance": self.guidance,
                   "lease_required": False, "mission_api": 2,
-                  "mission_profile": {"percent": MISSION_PERCENT, "duration_ms": MISSION_DURATION_MS},
-                  "remaining_ms": max(0, int((self.deadline - now) * 1000)) if self.deadline else None,
+                  "mission_profile": {"percent": MISSION_PERCENT, "motor_run_ms": MOTOR_RUN_MS},
+                  "motor_rearm": self.rearm,
+                  "remaining_ms": (max(0, int((self.deadline - now) * 1000))
+                                   if self.deadline is not None and math.isfinite(self.deadline) else None),
                   "motor": motor, "imu": telemetry.get("telemetry", {}),
                   "telemetry_mode": "live_read_only" if self.observer or self.mode == "telemetry"
                                     else "simulated" if self.mode == "observe" else "live",
@@ -606,6 +662,11 @@ def main(argv=None):
     from .stand_web import StandWebServer
     from .stand_session import default_session_path, write_session, remove_session
 
+    # numpy's OpenBLAS starts one thread per core at import, and after any
+    # threaded product its workers spin for ~0.2 s. One such product per camera
+    # frame kept five Orin cores busy (measured 2026-09-27: 258% vs 5% CPU for a
+    # 64x256 @ 256x400 product at 30 Hz). The spawned worker inherits this.
+    os.environ["OPENBLAS_NUM_THREADS"] = "1"
     ctx = mp.get_context("spawn")
     commands, events, previews = ctx.Queue(16), ctx.Queue(128), ctx.Queue(1)
     process = ctx.Process(target=perception_worker, args=(commands, events, previews, {

@@ -1,4 +1,5 @@
 """Mission boundaries and failure behavior without opening serial or a camera."""
+import math
 import queue
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -397,7 +398,7 @@ def test_one_step_submission_reserves_id_and_uses_only_fixed_onboard_settings():
     sup.tick()
     assert sup.spec.mission_id == receipt['mission_id']
     assert motors[0].starts == [(5, 60000)]
-    assert sup.deadline == clock() + 60
+    assert sup.deadline == math.inf
     assert sup.state == 'searching'
     assert commands.get_nowait()['mission_id'] == receipt['mission_id']
     for _ in range(4): sup.tick()
@@ -459,7 +460,7 @@ def test_preparing_waits_without_motor_authority_then_starts_exactly_once():
     ready_event(sup, clock)
     sup.tick()
     assert sup.state == 'searching' and motors[0].starts == [(5, 60000)]
-    assert sup.spec.mission_id == receipt['mission_id'] and sup.deadline == clock() + 60
+    assert sup.spec.mission_id == receipt['mission_id'] and sup.deadline == math.inf
     sup.tick()
     assert len(motors[0].starts) == 1
 
@@ -529,22 +530,92 @@ def test_concurrent_submissions_reserve_only_one_mission():
     assert motors[0].starts == [(5, 60000)]
 
 
-def test_public_mission_runs_without_client_until_fixed_timeout_and_never_restarts():
+def expire_motor_run(motor):
+    """What MotorSession reports after its host deadline stop is verified and the port closed."""
+    motor.s.update(stop_reason="duration expired", stop_status="verified", zero_confirmed=True,
+                   active=False, connected=False)
+
+
+def test_open_mission_chains_fresh_motor_runs_until_abort():
     sup, clock, motors, _ = public_setup()
     receipt = mission(sup)
     sup.tick()
-    deadline = sup.deadline
-    for _ in range(240):
+    assert sup.deadline == math.inf and sup.snapshot()['remaining_ms'] is None
+    for _ in range(3):
+        for _ in range(240):  # 60 s of healthy searching per run
+            clock.t += .25
+            progress(sup, clock)
+            sup.tick()
+        assert sup.state == 'searching'
+        expire_motor_run(motors[-1])
+        for _ in range(3):  # zero verified -> fresh session -> start accepted
+            progress(sup, clock)
+            sup.tick()
+        assert sup.state == 'searching' and sup.rearm is None
+    assert len(motors) == 4 and all(m.starts == [(5, 60000)] for m in motors)
+    sup.submit(dict(action='stop', mission_id=receipt['mission_id']))
+    sup.tick()
+    assert sup.state == 'cancelled' and motors[-1].stops == ['operator stop']
+    assert not sup.recovery_required
+
+
+def test_expired_run_is_not_replaced_until_the_serial_port_is_closed():
+    sup, clock, motors, _ = public_setup()
+    mission(sup)
+    sup.tick()
+    expire_motor_run(motors[0])
+    motors[0].s['connected'] = True
+    progress(sup, clock)
+    sup.tick()
+    assert sup.rearm == 'stopping' and len(motors) == 1
+    motors[0].s['connected'] = False
+    progress(sup, clock)
+    sup.tick()
+    assert sup.rearm == 'reconnecting' and len(motors) == 2 and not motors[1].starts
+
+
+def test_abort_between_chained_runs_relies_on_the_previous_verified_zero():
+    sup, clock, motors, _ = public_setup()
+    receipt = mission(sup)
+    sup.tick()
+    expire_motor_run(motors[0])
+    progress(sup, clock)
+    sup.tick()
+    assert sup.rearm == 'reconnecting'
+    fresh = motors[1]
+    fresh.stop = lambda reason: (fresh.stops.append(reason),
+                                 fresh.s.update(stop_status='unverified', zero_confirmed=False))
+    sup.submit(dict(action='stop', mission_id=receipt['mission_id']))
+    sup.tick()
+    assert sup.state == 'cancelled' and fresh.stops == ['operator stop'] and not fresh.starts
+    assert not sup.recovery_required
+
+
+def test_rearm_that_never_becomes_ready_fails_the_mission():
+    sup, clock, motors, _ = public_setup()
+    mission(sup)
+    sup.tick()
+    expire_motor_run(motors[0])
+    progress(sup, clock)
+    sup.tick()
+    motors[1].s['ready'] = False
+    for _ in range(41):
         clock.t += .25
         progress(sup, clock)
         sup.tick()
-    assert sup.state == 'timed_out' and sup.deadline == deadline
-    assert motors[0].starts == [(5, 60000)] and len(motors[0].stops) == 1
-    sup.event(dict(type='completion', mission_id=receipt['mission_id'], result='confirmed', committed=True,
-                   capture_mono=deadline-.1, commit_mono=clock(), source_epoch=0, path='/tmp/late'))
-    ready_event(sup, clock)
+    assert sup.state == 'failed' and 're-arm reconnecting timed out' in sup.error
+    assert not motors[1].starts
+
+
+def test_operator_stop_or_fault_is_never_chained():
+    sup, clock, motors, _ = public_setup()
+    mission(sup)
     sup.tick()
-    assert sup.state == 'timed_out' and len(motors[0].starts) == 1
+    motors[0].s.update(stop_reason='supervisor lease expired', stop_status='verified',
+                       zero_confirmed=True, connected=False, fault=True, error='supervisor lease expired')
+    progress(sup, clock)
+    sup.tick()
+    assert sup.state == 'failed' and len(motors) == 1
 
 
 def test_explicit_new_mission_after_completion_uses_a_new_motor_session():

@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import queue
+import time
 from types import SimpleNamespace
 
 import numpy as np
@@ -481,3 +482,40 @@ def test_worker_first_frame_grace_does_not_relax_runtime_freshness(monkeypatch, 
         assert len(faults) == 1 and error in faults[0]["reason"]
     else:
         assert not faults and len(ready) == 1
+
+
+def test_preview_encoder_keeps_newest_job_and_drops_failures():
+    import queue as queue_module
+    import threading as threading_module
+    from corvidia_perception.stand_perception import PreviewEncoder
+
+    output = queue_module.Queue(1)
+    gate, rendered = threading_module.Event(), []
+
+    def render(job):
+        gate.wait(2)
+        rendered.append(job)
+        if job == "bad":
+            raise RuntimeError("draw failed")
+        return job.encode()
+
+    encoder = PreviewEncoder(output, render)
+    try:
+        encoder.submit("first")      # picked up and blocked in render
+        time.sleep(.05)
+        for job in ("stale", "bad", "newest"):
+            encoder.submit(job)       # replaced before the encoder is free
+        gate.set()
+        deadline = time.monotonic() + 2
+        while len(rendered) < 2 and time.monotonic() < deadline:
+            time.sleep(.01)
+        assert rendered == ["first", "newest"]  # "stale" and "bad" were never drawn
+        assert output.get(timeout=2) == b"newest"  # the one-slot queue replaced "first"
+        encoder.submit("bad")
+        time.sleep(.05)
+        assert output.empty()        # a failed preview is dropped, the thread lives on
+        encoder.submit("after")
+        assert output.get(timeout=2) == b"after"
+    finally:
+        encoder.close()
+    assert not encoder._thread.is_alive()
